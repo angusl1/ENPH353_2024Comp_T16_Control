@@ -43,8 +43,8 @@ class drive_forward:
         hsv_cv_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2HSV)
 
         # defining blue mask threshold to detect clueboards
-        lower_blue = np.array([110, 50, 50]) 
-        upper_blue = np.array([130, 255, 255]) 
+        lower_blue = np.array([115, 50, 10]) 
+        upper_blue = np.array([125, 255, 255]) 
 
         blue_mask = cv2.inRange(hsv_cv_image, lower_blue, upper_blue)
 
@@ -120,7 +120,7 @@ class drive_forward:
     
         velocity = Twist()
     
-        velocity.linear.x = 1
+        velocity.linear.x = 0
         velocity.angular.z = 0
     
         return velocity
