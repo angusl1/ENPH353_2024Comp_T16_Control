@@ -31,6 +31,8 @@ class drive_forward:
         self.comp_pub = rospy.Publisher("/score_tracker", String, queue_size = 1)
 
     def callback(self, data):
+        do_sift = False
+
         try:
             cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
         except CvBridgeError as e:
@@ -50,9 +52,9 @@ class drive_forward:
 
         contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        # filtering clueboard by area (# of pixels contained within contour)
+        # filtering possible clueboards by area (# of pixels contained within contour)
         min_area = 5000
-        max_area = 30000
+        max_area = 50000
 
         potential_clueboards = []
         for contour in contours: 
@@ -60,12 +62,31 @@ class drive_forward:
                 potential_clueboards.append(contour)
 
         if potential_clueboards:
-            # avoid mistaking trees for signboard by getting biggest contour (since trees are usually smaller)
-            largest_signboard = max(potential_clueboards, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest_signboard)
+            do_sift = True
+
+            # avoid mistaking tree outlines for clueboard by getting biggest contour
+            largest_clueboard = max(potential_clueboards, key=cv2.contourArea)
+            x, y, w, h = cv2.boundingRect(largest_clueboard)
 
             cropped_image = cv_image[y:y+h, x:x+w]
             cv2.imshow('Cropped Image', cropped_image)
+
+            hsv_cropped_image = cv2.cvtColor(cropped_image, cv2.COLOR_BGR2HSV)
+            cropped_blue_mask = cv2.inRange(hsv_cropped_image, lower_blue, upper_blue)
+
+            # scale cropped image
+            # scale = 2
+            # height, width = cropped_image.shape[:2]
+
+            # scaled_image = cv2.resize(cropped_image, (int(width * scale), int(height * scale)))
+            # cv2.imshow('Scaled Image', scaled_image)
+
+            blue_mask_resized = cv2.resize(cropped_blue_mask, (cropped_image.shape[1], cropped_image.shape[0]))
+
+            bw_image = np.zeros_like(cropped_image)
+            bw_image[np.where(blue_mask_resized == 255)] = 255
+
+            cv2.imshow('Black & White Image', bw_image)
 
         contour_image = cv_image.copy()
 
