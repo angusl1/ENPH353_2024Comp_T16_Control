@@ -19,7 +19,7 @@ class image_converter:
 
     self.image_sub = rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
     self.timer_sub = rospy.Subscriber("/clock", Clock)
-    self.image_pub = rospy.Publisher("/R1/cmd_vel", Twist, queue_size=1)
+    self.vel_pub = rospy.Publisher("/R1/cmd_vel", Twist, queue_size=1)
     self.comp_pub = rospy.Publisher("/score_tracker", String, queue_size = 1)
     
     rospy.sleep(1)
@@ -27,9 +27,6 @@ class image_converter:
     self.start_time = rospy.get_time()
 
   def lineFollowing(self,frame):
-    if (rospy.get_time() - self.start_time > 10):
-       self.comp_pub.publish("kappa, chungus, -1, DONE")
-       sys.exit(0)    
 
     twist = Twist()
     twist.linear.x = 0.3
@@ -72,22 +69,33 @@ class image_converter:
 
   def callback(self,data):
       try:
-        cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
+        self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
       except CvBridgeError as e:
         print(e)
 
-      cv2.imshow("Image window", cv_image)
-      cv2.waitKey(3)
-      
-      try:
-        self.image_pub.publish(self.lineFollowing(cv_image))
-      except CvBridgeError as e:
-        print(e)
+  def start(self):
+      while (not rospy.is_shutdown()) and (rospy.get_time() - self.start_time < 5):
+
+        cv2.imshow("Image window", self.cv_image)
+        cv2.waitKey(3)
+
+        try:
+          self.vel_pub.publish(self.lineFollowing(self.cv_image))
+        except CvBridgeError as e:
+          print(e)
+
+      self.comp_pub.publish("kappa, chungus, -1, DONE")
+      twist = Twist()
+      twist.angular.z = 0
+      twist.linear.x = 0
+      self.vel_pub.publish(twist)
+
 
 
 def main(args):
   rospy.init_node('image_converter', anonymous=True)
   ic = image_converter()
+  ic.start()
   try:
     rospy.spin()
   except KeyboardInterrupt:
