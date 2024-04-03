@@ -118,7 +118,7 @@ class drive_forward:
 
                 blue_mask_resized = cv2.resize(pt_blue_mask, (pt_image.shape[1], pt_image.shape[0]))
 
-                # turn transformed image black and white
+                # turn image black and white
                 bw_image = np.zeros_like(pt_image)
                 bw_image[np.where(blue_mask_resized == 255)] = 255
 
@@ -133,16 +133,6 @@ class drive_forward:
         cv2.drawContours(contour_image, potential_clueboards, -1, (0, 0, 255), 2)
 
         cv2.imshow('Contours', contour_image)
-
-    def getLetters(self, image, area_threshold):
-        flag = False
-        
-        h, w, _ = image.shape
-        area = h * w
-
-        if area < area_threshold:
-            return
-        return
 
     def spawn_position(self, position):
 
