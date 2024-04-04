@@ -34,7 +34,7 @@ class state_manager:
   def lineFollowing(self,frame):
 
     twist = Twist()
-    twist.linear.x = 0.5
+    twist.linear.x = 0.4
 
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -69,9 +69,16 @@ class state_manager:
     #cv2.imshow("Mask window", gray_mask)
     #cv2.waitKey(3)
 
+    error = int(width/2) - cx
+
     #PID well i guess only P
-    P = 0.035
-    twist.angular.z = P * (int(width/2) - cx)
+    P = 0.025
+    min_error = 25
+
+    if np.abs(error) > min_error:
+      twist.angular.z = P * (int(width/2) - cx)
+    else: 
+      twist.angular.z = 0
     
     return twist
 
@@ -133,9 +140,14 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 10000:
+        if max_contour_area > 30000:
            self.crosswalk = False
            print(max_contour_area)
+           try:
+            self.vel_pub.publish(self.stop_robot())
+           except CvBridgeError as e:
+            print(e)
+           rospy.sleep(2)
 
     cv2.imshow("Mask window", red_mask)
     cv2.waitKey(3)
