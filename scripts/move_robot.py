@@ -72,6 +72,8 @@ class state_manager:
     #cv2.imshow("Mask window", gray_mask)
     #cv2.waitKey(3)
 
+    error = int(width/2) - cx
+
     #PID well i guess only P
     P = 0.025
     min_error = 25
@@ -306,9 +308,14 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 10000:
+        if max_contour_area > 30000:
            self.crosswalk = False
            print(max_contour_area)
+           try:
+            self.vel_pub.publish(self.stop_robot())
+           except CvBridgeError as e:
+            print(e)
+           rospy.sleep(2)
 
     # cv2.imshow("Mask window", red_mask)
     cv2.waitKey(3)
