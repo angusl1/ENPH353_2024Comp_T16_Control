@@ -22,7 +22,7 @@ from tensorflow.python.keras import optimizers
 from tensorflow.python.keras.models import load_model
 from tensorflow.python.keras import backend
 
-TEST_PATH = "test_img.png"
+TEST_PATH = "clueboard.jpg"
 
 class clue_model: 
     
