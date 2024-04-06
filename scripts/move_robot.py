@@ -26,9 +26,11 @@ class state_manager:
     self.vel_pub = rospy.Publisher("/R1/cmd_vel", Twist, queue_size=1)
     self.comp_pub = rospy.Publisher("/score_tracker", String, queue_size = 1)
 
+    # State flags
     self.get_image = False # Flag for getting clueboard image
-    self.clueboard = True # Flag for seen clueboard
+    self.clueboard_count = 0 # Count for seen clueboard
     self.crosswalk = True # Flag for detecting crosswalk
+    self.pink_line_count = 0 # Flag for counting pink lines
     
 
     self.past_error = 0 # For I in line following
@@ -146,6 +148,8 @@ class state_manager:
              removed_border_image = cv2.rectangle(removed_border_image.copy(), (x,y), (x+w, y+h), (0, 255, 0), 2)
 
           cv2.imshow('Bounding Rectangle around Words', removed_border_image)
+          self.clueboard_count = self.clueboard_count + 1
+          print(self.clueboard_count)
       
         # erosion
 
@@ -317,8 +321,8 @@ class state_manager:
     mask = cv2.erode(mask, self.kernel, iterations = 1)
     mask = cv2.dilate(mask, self.kernel, iterations = 3)
 
-    cv2.imshow("Ped Window", mask)
-    cv2.waitKey(3)
+    #cv2.imshow("Ped Window", mask)
+    #cv2.waitKey(3)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if contours:
