@@ -19,6 +19,7 @@ MAX_TIME = 1000
 class state_manager:
   def __init__(self):
     self.bridge = CvBridge()
+    self.kernel = np.ones((5,5),np.uint8)
 
     self.image_sub = rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
     self.timer_sub = rospy.Subscriber("/clock", Clock)
@@ -28,6 +29,7 @@ class state_manager:
     self.get_image = False # Flag for getting clueboard image
     self.clueboard = True # Flag for seen clueboard
     self.crosswalk = True # Flag for detecting crosswalk
+    
 
     self.past_error = 0 # For I in line following
     
@@ -288,17 +290,61 @@ class state_manager:
         
         # Check if area of max contour is large enough
         if max_contour_area > 30000:
-           self.crosswalk = False
            print(max_contour_area)
            try:
             self.vel_pub.publish(self.stop_robot())
            except CvBridgeError as e:
             print(e)
-           rospy.sleep(5)
+           while self.crosswalk:
+              self.pedestrian_avoidance(self.cv_image)
 
     # cv2.imshow("Mask window", red_mask)
     cv2.waitKey(3)
     pass
+
+  def pedestrian_avoidance(self, frame):
+    # Define region of interest
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    max_height = 400
+    bot_height = 100
+    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+
+    # Mask the jeans
+    low_mask = np.array([80, 50, 50])
+    upper_mask = np.array([140, 150, 150])
+    mask = cv2.inRange(roi_frame, low_mask, upper_mask)
+    mask = cv2.erode(mask, self.kernel, iterations = 1)
+    mask = cv2.dilate(mask, self.kernel, iterations = 3)
+
+    cv2.imshow("Ped Window", mask)
+    cv2.waitKey(3)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+      max_contour = max(contours, key=cv2.contourArea)
+
+      # Find the centroid of the largest contour
+      M = cv2.moments(max_contour)
+      if M['m00'] != 0 and cv2.contourArea(max_contour) > 400:
+          cx = int(M['m10'] / M['m00'])
+          cy = int(M['m01'] / M['m00'])
+
+          # Draw a red circle at the centroid position
+          cv2.circle(mask, (cx, cy), radius=20, color=(0, 0, 255), thickness=-1)
+          
+          if cx > 440 and cx < 840:
+            print('ped seen in middle moving soon')
+            rospy.sleep(0.45)
+            try:
+              self.vel_pub.publish(self.forward_robot())
+            except CvBridgeError as e:
+              print(e)
+            rospy.sleep(0.5)
+            self.crosswalk = False
+
+     
+        
 
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -315,6 +361,8 @@ class state_manager:
     twist = Twist()
     twist.angular.z = 0
     twist.linear.x = 0.5
+
+    return twist
 
   def reset_position(self):
 
@@ -367,11 +415,13 @@ class state_manager:
       self.vel_pub.publish(self.stop_robot())
 
 def main(args):
+
   rospy.init_node('image_converter', anonymous=True)
   rob = state_manager()
-  rob.start()
-  # rospy.sleep(5)
+
   rob.reset_position()
+  rob.start()
+
   print("Shutting down")
   cv2.destroyAllWindows()
 
