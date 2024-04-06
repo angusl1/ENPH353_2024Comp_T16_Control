@@ -34,7 +34,7 @@ class state_manager:
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
 
-  def lineFollowing(self,frame):
+  def RoadFollowing(self,frame):
 
     twist = Twist()
     twist.linear.x = 0.4
@@ -171,7 +171,7 @@ class state_manager:
 
         # Line following
         try:
-          self.vel_pub.publish(self.lineFollowing(self.cv_image))
+          self.vel_pub.publish(self.RoadFollowing(self.cv_image))
         except CvBridgeError as e:
           print(e)
 
