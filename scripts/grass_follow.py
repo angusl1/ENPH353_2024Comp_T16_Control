@@ -26,6 +26,7 @@ class state_manager:
     self.comp_pub = rospy.Publisher("/score_tracker", String, queue_size = 1)
 
     self.crosswalk = True # Flag for detecting crosswalk
+    self.past_error = 0
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
@@ -52,7 +53,7 @@ class state_manager:
 
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
-    #mask = cv2.erode(mask, kernel, iterations = 1)
+    # mask = cv2.erode(mask, kernel, iterations = 1)
     mask = cv2.dilate(mask, kernel, iterations = 3)
     mask = cv2.erode(mask, kernel, iterations = 3)
     mask = cv2.dilate(mask, kernel, iterations = 1)
@@ -89,14 +90,17 @@ class state_manager:
     error = int(width/2) - centroid_x
 
     #PID well i guess only P
-    P = 0.025
+    P = 0.020
+    I = 0.010
     min_error = 25
 
     if np.abs(error) > min_error:
       pass
-      twist.angular.z = P * error
+      twist.angular.z = P * error - I * (error - self.past_error)
     else: 
       twist.angular.z = 0
+
+    self.past_error = error
     
     return twist
 
@@ -185,12 +189,12 @@ class state_manager:
       msg = ModelState()
       msg.model_name = 'R1'
 
-      msg.pose.position.x = 1.5
-      msg.pose.position.y = 0.5
+      msg.pose.position.x = 0.5
+      msg.pose.position.y = -0.5
       msg.pose.position.z = 0.2
       msg.pose.orientation.x = 0
       msg.pose.orientation.y = 0
-      msg.pose.orientation.z = 0
+      msg.pose.orientation.z = 1
       msg.pose.orientation.w = 1
 
       # msg.pose.position.x = 5.5
