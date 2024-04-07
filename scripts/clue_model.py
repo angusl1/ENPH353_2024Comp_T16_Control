@@ -29,12 +29,12 @@ class clue_model:
     def __init__(self):
 
         # Create a model and import weights
-        self.model = load_model('trained_reader.keras')
+        self.model = load_model('trained_reader_no_opt.keras')
 
     # Creates a model with the license plate reader architecture
     def create_model(self):
         conv_model = models.Sequential()
-        conv_model.add(layers.Conv2D(32, (3,3), activation='relu', input_shape=(298, 100, 3))) # Convolutional layer with 32 filters
+        conv_model.add(layers.Conv2D(32, (3,3), activation='relu', input_shape=(300, 160, 3))) # Convolutional layer with 32 filters
         conv_model.add(layers.MaxPooling2D((2,2))) # Downsampling
         conv_model.add(layers.Conv2D(64, (3, 3), activation='relu')) # 64 more filters
         conv_model.add(layers.MaxPooling2D((2,2))) # More downsampling
@@ -54,7 +54,7 @@ class clue_model:
         
     # Takes an input (image) and returns the ASCII prediction character
     def predict(self, image):
-        img_aug = image.resize((100, 298))
+        img_aug = image.resize((160, 300))
         x = np.asarray(img_aug)
         x = np.expand_dims(x, axis=0)
         x = x/255
