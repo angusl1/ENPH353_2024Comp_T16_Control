@@ -19,22 +19,28 @@ MAX_TIME = 1000
 class state_manager:
   def __init__(self):
     self.bridge = CvBridge()
+    self.kernel = np.ones((5,5),np.uint8)
 
     self.image_sub = rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
     self.timer_sub = rospy.Subscriber("/clock", Clock)
     self.vel_pub = rospy.Publisher("/R1/cmd_vel", Twist, queue_size=1)
     self.comp_pub = rospy.Publisher("/score_tracker", String, queue_size = 1)
 
+    # State flags
     self.get_image = False # Flag for getting clueboard image
-    self.clueboard = True # Flag for seen clueboard
+    self.clueboard_count = 0 # Count for seen clueboard
     self.crosswalk = True # Flag for detecting crosswalk
+    self.pink_line_count = 0 # Flag for counting pink lines
+    
+
+    self.past_error = 0 # For I in line following
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
 
-  def lineFollowing(self,frame):
+  def RoadFollowing(self,frame):
 
     twist = Twist()
     twist.linear.x = 0.4
@@ -75,23 +81,27 @@ class state_manager:
     error = int(width/2) - cx
 
     #PID well i guess only P
-    P = 0.025
+    P = 0.020
+    I = 0.010
     min_error = 25
 
-    error = int(width / 2) - cx
-    if np.abs(error) < min_error:
-       twist.angular.z = 0
-    else:
-      twist.angular.z = P * error
+    if np.abs(error) > min_error:
+      pass
+      twist.angular.z = P * error - I * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
     
     return twist
   
+  # cleans up image by removing border then gets images of letters and puts them in a separate file
   def get_letters(self, frame):
     height, width, _ = frame.shape
     area = height * width
 
     if self.get_image:
-      if (rospy.get_time() - self.clueboard_time) > 1.0:
+      if (rospy.get_time() - self.clueboard_time) > 3.0:
         self.get_image = False
       return  
     
@@ -101,7 +111,6 @@ class state_manager:
 
       cv2.imwrite('clueboard.jpg', frame)
       clueboard_image = cv2.imread('clueboard.jpg')
-      height, width, _ = clueboard_image.shape
 
       if clueboard_image is not None:
         # cv2.imshow('Clueboard Image', clueboard_image)
@@ -120,194 +129,167 @@ class state_manager:
           mask = np.zeros_like(gray_image)
           cv2.drawContours(mask, [largest_contour], -1, (255), cv2.FILLED)
           removed_border_image = cv2.bitwise_and(clueboard_image, clueboard_image, mask=mask)
-          height,width,_ = removed_border_image.shape
+          borderless_h, borderless_w, _ = removed_border_image.shape
 
           # bounding boxes around words
           letters_gray = cv2.cvtColor(removed_border_image, cv2.COLOR_BGR2GRAY)
 
           letter_binary = cv2.adaptiveThreshold(letters_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 4)
 
-          letter_contours, hierarchy = cv2.findContours(letter_binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+          letter_contours, _ = cv2.findContours(letter_binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
           letter_image = removed_border_image.copy()
 
-          # filter contours by size to only get the letter contours not the outline of the word
+          # filter contours by size to only get the letter contours not the outline of the word, and get rid of small blemishes
           filtered_contours = []
 
           for i, lc in enumerate(letter_contours):
 
             contour_area = cv2.contourArea(lc)
 
-            if contour_area < 100:
-              if hierarchy[0][i][3] != -1:
-                filtered_contours.append(lc)
-            elif contour_area < 1000: 
+            if contour_area > 100 and contour_area < 1000:
               filtered_contours.append(lc)
 
-          for i in filtered_contours:
-            print(cv2.contourArea(i))
+          # ordering contours: top words first then bottom words
+          top_word = []
+          bottom_word = []
 
-          cv2.drawContours(letter_image, filtered_contours, -1, (0, 0, 255), 1)
+          filtered_contours = sorted(filtered_contours, key=lambda c: cv2.boundingRect(c)[1])
+
+          for lc in filtered_contours:
+            _, y1, _, _ = cv2.boundingRect(lc)
+            if y1 < frame.shape[0] / 2:
+              top_word.append(lc)
+            else:
+               bottom_word.append(lc)
+
+          top_word = sorted(top_word, key=lambda c: cv2.boundingRect(c)[0])  
+          bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
+
+          sorted_contours = top_word + bottom_word
+
+          print(borderless_h, borderless_w)
+
+          num_letters = len(sorted_contours)
+
+          for i, lc in enumerate(sorted_contours):
+            x, y, w, h = cv2.boundingRect(lc)
+            print(w, h)
+            letter_roi = frame[y:y+h, x:x+w]
+
+            cv2.imwrite(f"letter_{i}.png", letter_roi)
+
+          cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
           cv2.imshow('Bounding Boxes around Words', letter_image)
 
-        # erosion
-
-        # cv2.imshow('Result', removed_border_image)
-        # kernel = np.ones((3, 3), np.uint8)
-
-        # thinner_image = cv2.erode(binary_image, kernel, iterations=1)
-        # contours, _ = cv2.findContours(thinner_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        # contour_image = cv2.drawContours(binary_image.copy(), contours, -1, (0, 255, 0), 2)
-        # cv2.imshow('Clueboard Contours', contour_image)
-
-        # cv2.imshow('Eroded Image', thinner_image)
+          self.clueboard_count = self.clueboard_count + 1
+          print(self.clueboard_count)
 
       self.get_image = True
+
+  def find_clueboard(self, frame):
+    # convert image to hsv
+    hsv_cv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # defining blue mask threshold to detect clueboards
+    lower_blue = np.array([118, 50, 20]) 
+    upper_blue = np.array([122, 255, 255]) 
+
+    blue_mask = cv2.inRange(hsv_cv_image, lower_blue, upper_blue)
+
+    contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # filtering possible clueboards by area (# of pixels contained within contour)
+    min_area = 5000
+    max_area = 50000
+
+    potential_clueboards = []
+    for contour in contours: 
+        if min_area < cv2.contourArea(contour) < max_area:
+            potential_clueboards.append(contour)
+
+    if potential_clueboards:
+        # avoid mistaking tree outlines for clueboard by getting biggest contour
+        largest_clueboard = max(potential_clueboards, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_clueboard)
+
+        cropped_image = frame[y:y+h, x:x+w]
+
+        # cv2.imshow('Cropped Image', cropped_image)
+
+        # polygon approximation of clueboard
+        epsilon = 0.05 * cv2.arcLength(largest_clueboard, True)
+        approximate_contour = cv2.approxPolyDP(largest_clueboard, epsilon, True)
+
+        if len(approximate_contour) == 4:
+            # corners of the clueboard
+            corners = np.array([point[0] for point in approximate_contour])
+                
+            col, row, _ = cropped_image.shape
+
+            # calculate average x and y coordinates of the corners
+            avg_x = np.mean(corners[:, 0]) 
+            avg_y = np.mean(corners[:, 1]) 
+
+            top_left = (0, 0)
+            bottom_left = (0, 0)
+            top_right = (0, 0)
+            bottom_right = (0, 0)
+
+            # Iterate through corners
+            for corner in corners:
+                x, y = corner
+                
+                # assign points as top/bottom right/left by comparing to avg_x,y
+                if x < avg_x:
+                    if y > avg_y:
+                        top_left = corner 
+                    else:
+                        bottom_left = corner
+                else:
+                    if y > avg_y:
+                        top_right = corner 
+                    else:
+                        bottom_right = corner
+
+            pts1 = np.float32([bottom_left, bottom_right, top_left, top_right])
+            pts2 = np.float32([[0, 0], [row, 0], [0, col], [row, col]])
+            
+            # perspective transform matrix and transform image
+            pt_matrix = cv2.getPerspectiveTransform(pts1, pts2)
+            pt_image = cv2.warpPerspective(frame, pt_matrix, (row, col))
+
+            # cv2.imshow('Transformed Image', pt_image)
+
+            # second blue mask 
+            hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
+            pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue, upper_blue)
+
+            blue_mask_resized = cv2.resize(pt_blue_mask, (pt_image.shape[1], pt_image.shape[0]))
+
+            # turn transformed image black and white
+            bw_image = np.zeros_like(pt_image)
+            bw_image[np.where(blue_mask_resized == 255)] = 255
+
+            # cv2.imshow('Black & White Image', bw_image)
+
+            self.get_letters(bw_image)
+
+    contour_image = frame.copy()
+
+    # draw all contours in green
+    cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 2)
+
+    # draw potential clueboard contours in red
+    cv2.drawContours(contour_image, potential_clueboards, -1, (0, 0, 255), 2)
+
+    cv2.imshow('Contours', contour_image)     
 
   def callback(self,data):
       try:
         self.cv_image = self.bridge.imgmsg_to_cv2(data, "bgr8")
       except CvBridgeError as e:
         print(e)
-
-  def start(self):
-      
-      # Set time limit for run
-      while (not rospy.is_shutdown()) and (rospy.get_time() - self.start_time < MAX_TIME):
-
-        # Show camera feed
-        # cv2.imshow("Image window", self.cv_image)
-        cv2.waitKey(3)
-
-        # Line following
-        try:
-          self.vel_pub.publish(self.lineFollowing(self.cv_image))
-        except CvBridgeError as e:
-          print(e)
-
-        # convert image to hsv
-        hsv_cv_image = cv2.cvtColor(self.cv_image, cv2.COLOR_BGR2HSV)
-
-        # defining blue mask threshold to detect clueboards
-        lower_blue = np.array([118, 50, 20]) 
-        upper_blue = np.array([122, 255, 255]) 
-
-        blue_mask = cv2.inRange(hsv_cv_image, lower_blue, upper_blue)
-
-        contours, _ = cv2.findContours(blue_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # filtering possible clueboards by area (# of pixels contained within contour)
-        min_area = 5000
-        max_area = 50000
-
-        potential_clueboards = []
-        for contour in contours: 
-            if min_area < cv2.contourArea(contour) < max_area:
-                potential_clueboards.append(contour)
-
-        if potential_clueboards:
-            # avoid mistaking tree outlines for clueboard by getting biggest contour
-            largest_clueboard = max(potential_clueboards, key=cv2.contourArea)
-            x, y, w, h = cv2.boundingRect(largest_clueboard)
-
-            cropped_image = self.cv_image[y:y+h, x:x+w]
-
-            # cv2.imshow('Cropped Image', cropped_image)
-
-            # polygon approximation of clueboard
-            epsilon = 0.05 * cv2.arcLength(largest_clueboard, True)
-            approximate_contour = cv2.approxPolyDP(largest_clueboard, epsilon, True)
-
-            if len(approximate_contour) == 4:
-                # corners of the clueboard
-                corners = np.array([point[0] for point in approximate_contour])
-                    
-                col, row, _ = cropped_image.shape
-
-                # calculate average x and y coordinates of the corners
-                avg_x = np.mean(corners[:, 0]) 
-                avg_y = np.mean(corners[:, 1]) 
-
-                top_left = (0, 0)
-                bottom_left = (0, 0)
-                top_right = (0, 0)
-                bottom_right = (0, 0)
-
-                # Iterate through corners
-                for corner in corners:
-                    x, y = corner
-                    
-                    # assign points as top/bottom right/left by comparing to avg_x,y
-                    if x < avg_x:
-                        if y > avg_y:
-                            top_left = corner 
-                        else:
-                            bottom_left = corner
-                    else:
-                        if y > avg_y:
-                            top_right = corner 
-                        else:
-                            bottom_right = corner
-
-                pts1 = np.float32([bottom_left, bottom_right, top_left, top_right])
-                pts2 = np.float32([[0, 0], [row, 0], [0, col], [row, col]])
-                
-                # perspective transform matrix and transform image
-                pt_matrix = cv2.getPerspectiveTransform(pts1, pts2)
-                pt_image = cv2.warpPerspective(self.cv_image, pt_matrix, (row, col))
-
-                # cv2.imshow('Transformed Image', pt_image)
-
-                # second blue mask 
-                hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
-                pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue, upper_blue)
-
-                blue_mask_resized = cv2.resize(pt_blue_mask, (pt_image.shape[1], pt_image.shape[0]))
-
-                # turn transformed image black and white
-                bw_image = np.zeros_like(pt_image)
-                bw_image[np.where(blue_mask_resized == 255)] = 255
-
-                # cv2.imshow('Black & White Image', bw_image)
-
-                desired_width = 800
-                desired_height = 100
-
-                rh, rw = bw_image.shape[:2]
-
-                scale_x = desired_width / rw
-                scale_y = desired_height / rh
-
-                scale = min(scale_x, scale_y)
-
-                new_width = int(rw * scale)
-                new_height = int(rh * scale)
-
-                resized_image = cv2.resize(bw_image, (new_width, new_height))
-
-                self.get_letters(resized_image)
-
-        contour_image = self.cv_image.copy()
-
-        # draw all contours in green
-        cv2.drawContours(contour_image, contours, -1, (0, 255, 0), 2)
-
-        # draw potential signboard contours in red
-        cv2.drawContours(contour_image, potential_clueboards, -1, (0, 0, 255), 2)
-
-        cv2.imshow('Contours', contour_image)
-
-        # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
-        if self.crosswalk:
-
-          # Initiate a sequence if the crosswalk is detected
-          self.detect_crosswalk(self.cv_image)
-
-      # End message
-      self.comp_pub.publish("kappa, chungus, -1, DONE")
-      
-      # Stop the robot
-      self.vel_pub.publish(self.stop_robot())
 
   # Detect the crosswalk contour
   def detect_crosswalk(self, frame):
@@ -334,17 +316,59 @@ class state_manager:
         
         # Check if area of max contour is large enough
         if max_contour_area > 30000:
-           self.crosswalk = False
            print(max_contour_area)
            try:
             self.vel_pub.publish(self.stop_robot())
            except CvBridgeError as e:
             print(e)
-           rospy.sleep(2)
+           while self.crosswalk:
+              self.pedestrian_avoidance(self.cv_image)
 
     # cv2.imshow("Mask window", red_mask)
     cv2.waitKey(3)
     pass
+
+  def pedestrian_avoidance(self, frame):
+    # Define region of interest
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    max_height = 400
+    bot_height = 100
+    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+
+    # Mask the jeans
+    low_mask = np.array([80, 50, 50])
+    upper_mask = np.array([140, 150, 150])
+    mask = cv2.inRange(roi_frame, low_mask, upper_mask)
+    mask = cv2.erode(mask, self.kernel, iterations = 1)
+    mask = cv2.dilate(mask, self.kernel, iterations = 3)
+
+    #cv2.imshow("Ped Window", mask)
+    #cv2.waitKey(3)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+      max_contour = max(contours, key=cv2.contourArea)
+
+      # Find the centroid of the largest contour
+      M = cv2.moments(max_contour)
+      if M['m00'] != 0 and cv2.contourArea(max_contour) > 400:
+          cx = int(M['m10'] / M['m00'])
+          cy = int(M['m01'] / M['m00'])
+
+          # Draw a red circle at the centroid position
+          cv2.circle(mask, (cx, cy), radius=20, color=(0, 0, 255), thickness=-1)
+          
+          if cx > 440 and cx < 840:
+            print('ped seen in middle moving soon')
+            rospy.sleep(0.45)
+            try:
+              self.vel_pub.publish(self.forward_robot())
+            except CvBridgeError as e:
+              print(e)
+            rospy.sleep(0.5)
+            self.crosswalk = False
+        
 
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -353,8 +377,17 @@ class state_manager:
       twist.angular.z = 0
       twist.linear.x = 0
       
-      return twist     
-  
+      return twist
+
+  # Return a twist object which makes the robot go forward
+  def forward_robot(self):
+
+    twist = Twist()
+    twist.angular.z = 0
+    twist.linear.x = 0.5
+
+    return twist
+
   def reset_position(self):
 
       msg = ModelState()
@@ -376,12 +409,43 @@ class state_manager:
       except rospy.ServiceException:
           print ("Service call failed")
 
+  # Start function, considers states
+  def start(self):
+      
+      # Set time limit for run
+      while (not rospy.is_shutdown()) and (rospy.get_time() - self.start_time < MAX_TIME):
+
+        # Show camera feed
+        # cv2.imshow("Image window", self.cv_image)
+        cv2.waitKey(3)
+
+        # Line following
+        try:
+          self.vel_pub.publish(self.RoadFollowing(self.cv_image))
+          self.find_clueboard(self.cv_image)
+        except CvBridgeError as e:
+          print(e)
+
+        # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
+        if self.crosswalk:
+
+          # Initiate a sequence if the crosswalk is detected
+          self.detect_crosswalk(self.cv_image)
+
+      # End message
+      self.comp_pub.publish("kappa, chungus, -1, DONE")
+      
+      # Stop the robot
+      self.vel_pub.publish(self.stop_robot())
+
 def main(args):
+
   rospy.init_node('image_converter', anonymous=True)
   rob = state_manager()
-  rob.start()
-  # rospy.sleep(5)
+
   rob.reset_position()
+  rob.start()
+
   print("Shutting down")
   cv2.destroyAllWindows()
 
