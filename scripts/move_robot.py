@@ -86,7 +86,7 @@ class state_manager:
     
     return twist
   
-  def get_clueboard(self, frame):
+  def get_letters(self, frame):
     height, width, _ = frame.shape
     area = height * width
 
@@ -127,19 +127,29 @@ class state_manager:
 
           letter_binary = cv2.adaptiveThreshold(letters_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 4)
 
-          letter_contours, _ = cv2.findContours(letter_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+          letter_contours, hierarchy = cv2.findContours(letter_binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
           letter_image = removed_border_image.copy()
-          cv2.drawContours(letter_image, letter_contours, -1, (0, 255, 0), 1)
 
+          # filter contours by size to only get the letter contours not the outline of the word
+          filtered_contours = []
+
+          for i, lc in enumerate(letter_contours):
+
+            contour_area = cv2.contourArea(lc)
+
+            if contour_area < 100:
+              if hierarchy[0][i][3] != -1:
+                filtered_contours.append(lc)
+            elif contour_area < 1000: 
+              filtered_contours.append(lc)
+
+          for i in filtered_contours:
+            print(cv2.contourArea(i))
+
+          cv2.drawContours(letter_image, filtered_contours, -1, (0, 0, 255), 1)
           cv2.imshow('Bounding Boxes around Words', letter_image)
 
-          for contour in letter_contours:
-             x, y, w, h = cv2.boundingRect(contour)
-             removed_border_image = cv2.rectangle(removed_border_image.copy(), (x,y), (x+w, y+h), (0, 255, 0), 2)
-
-          cv2.imshow('Bounding Rectangle around Words', removed_border_image)
-      
         # erosion
 
         # cv2.imshow('Result', removed_border_image)
@@ -258,9 +268,24 @@ class state_manager:
                 bw_image = np.zeros_like(pt_image)
                 bw_image[np.where(blue_mask_resized == 255)] = 255
 
-                cv2.imshow('Black & White Image', bw_image)
+                # cv2.imshow('Black & White Image', bw_image)
 
-                self.get_clueboard(bw_image)
+                desired_width = 800
+                desired_height = 100
+
+                rh, rw = bw_image.shape[:2]
+
+                scale_x = desired_width / rw
+                scale_y = desired_height / rh
+
+                scale = min(scale_x, scale_y)
+
+                new_width = int(rw * scale)
+                new_height = int(rh * scale)
+
+                resized_image = cv2.resize(bw_image, (new_width, new_height))
+
+                self.get_letters(resized_image)
 
         contour_image = self.cv_image.copy()
 
