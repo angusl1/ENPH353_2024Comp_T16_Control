@@ -32,7 +32,7 @@ class state_manager:
     self.clueboard_count = 0 # Count for seen clueboard
     self.crosswalk = True # Flag for detecting crosswalk
     self.pink_line_count = 0 # Flag for counting pink lines
-    
+    self.past_cb3 = False
 
     self.past_error = 0 # For I in line following
     
@@ -66,6 +66,10 @@ class state_manager:
     if contours:
         # Find the contour with the largest area (assuming it's the path)
         max_contour = max(contours, key=cv2.contourArea)
+        
+        if cv2.contourArea(max_contour) > 300000:
+         twist.angular.z = 5
+         return twist
 
         # Find the centroid of the largest contour
         M = cv2.moments(max_contour)
@@ -198,10 +202,9 @@ class state_manager:
               print(f"SKIP {i}")
 
           cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
-          cv2.imshow('Bounding Boxes around Words', letter_image)
-
           self.clueboard_count = self.clueboard_count + 1
-          print(self.clueboard_count)
+          print("Clueboard count: " ,(self.clueboard_count))
+          cv2.imshow('Bounding Boxes around Words', letter_image)
 
       self.get_image = True
 
@@ -338,7 +341,7 @@ class state_manager:
         
         # Check if area of max contour is large enough
         if max_contour_area > 30000:
-           print(max_contour_area)
+           print("Sidewalk Red Line Area: " ,(max_contour_area))
            try:
             self.vel_pub.publish(self.stop_robot())
            except CvBridgeError as e:
@@ -390,6 +393,117 @@ class state_manager:
               print(e)
             rospy.sleep(0.5)
             self.crosswalk = False
+
+  # Activate after third sign
+  # If the truck is close stop the robot
+  # Follows contours with left bias when contour is large
+  def roundabout_follow(self, frame):
+
+    kernel = np.ones((5,5),np.uint8)
+
+    twist = Twist()
+    twist.linear.x = 0.5
+
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    max_height = 300
+    bot_height = 0
+    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+    cx1 = cx2 =  cy1 = cy2 = 0
+
+    # Define the lower and upper bounds for gray
+    lower_gray = np.array([0, 0, 80])
+    upper_gray = np.array([180, 10, 90])
+
+    # Create a mask for the gray path
+    mask = cv2.inRange(roi_frame, lower_gray, upper_gray)
+    #mask = cv2.erode(mask, kernel, iterations = 3)
+    mask = cv2.dilate(mask, kernel, iterations = 4)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+    # Find the contour with the largest area (assuming it's the path)
+      max_contour = max(contours, key=cv2.contourArea)
+      print(cv2.contourArea(max_contour))
+
+      if cv2.contourArea(max_contour) > 300000:
+         twist.angular.z = 5
+         return twist
+
+    # Find the centroid of the largest contour
+      M = cv2.moments(max_contour)
+      if M['m00'] != 0:
+          cx1 = int(M['m10'] / M['m00'])
+          cy1 = int(M['m01'] / M['m00'])
+
+          # Draw a red circle at the centroid position
+          cv2.circle(mask, (cx1, cy1), radius=20, color=(0, 0, 255), thickness=-1)
+
+    cv2.imshow("Mask window", mask)
+    cv2.waitKey(3)
+
+    error = int(width/2) - cx1
+
+    #PID well i guess only P
+    P = 0.020
+    I = 0.010
+    min_error = 25
+
+    if np.abs(error) > min_error:
+      pass
+      twist.angular.z = P * error - I * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
+    
+    return twist
+  
+  # Stops the robot if the truck is close
+  # Finds contour of truck and stops if the contour is large
+  def truck_detect(self,frame):
+
+    # Make sure we are past the 3rd clueboard
+    if self.past_cb3 == False:
+      cb3_time = rospy.get_time()
+      wait_timer = 2.4
+      while rospy.get_time() - cb3_time < wait_timer:
+        try:
+          self.vel_pub.publish(self.RoadFollowing(self.cv_image))
+        except CvBridgeError as e:
+          print(e)
+      self.past_cb3 = True
+
+    kernel = np.ones((5,5),np.uint8)
+
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+
+    # Define the lower and upper bounds for truck
+    lower = np.array([0, 0, 120])   
+    upper = np.array([20, 20, 205]) 
+
+    # Create a mask for path sides and remove noise
+    mask = cv2.inRange(hsv_frame, lower, upper)
+    mask = cv2.erode(mask, kernel, iterations = 2)
+    mask = cv2.dilate(mask, kernel, iterations = 3)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        max_contour = max(contours, key=cv2.contourArea)
+      
+        # Stop the robot if the truck is too close
+        if cv2.contourArea(max_contour) > 10000:
+           cv2.imshow("Truck window", mask)
+           cv2.waitKey(3)
+           return self.stop_robot()
+        else:
+           return self.roundabout_follow(frame) 
+           
+    return self.roundabout_follow(frame) # Return a road following twist if the truck contour is not found
         
 
   # Return a twist object which renders the robot stationary
@@ -442,15 +556,24 @@ class state_manager:
         cv2.waitKey(3)
 
         # Line following
-        try:
-          self.vel_pub.publish(self.RoadFollowing(self.cv_image))
-          self.find_clueboard(self.cv_image)
-        except CvBridgeError as e:
-          print(e)
+        if self.clueboard_count < 3:
+          try:
+            self.vel_pub.publish(self.RoadFollowing(self.cv_image))
+          except CvBridgeError as e:
+            print(e)
+        elif self.pink_line_count == 0:
+          try:
+            self.vel_pub.publish(self.truck_detect(self.cv_image))
+          except CvBridgeError as e:
+            print(e)
+        elif self.pink_line_count == 1: 
+           # TODO move the grass following code here
+           pass
+        
+        self.find_clueboard(self.cv_image)
 
         # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
         if self.crosswalk:
-
           # Initiate a sequence if the crosswalk is detected
           self.detect_crosswalk(self.cv_image)
 
