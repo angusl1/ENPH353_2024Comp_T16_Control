@@ -100,13 +100,14 @@ class state_manager:
   def get_letters(self, frame):
     height, width, _ = frame.shape
     area = height * width
+    aspect_ratio = width / height
 
     if self.get_image:
       if (rospy.get_time() - self.clueboard_time) > 3.0:
         self.get_image = False
       return  
     
-    if area > 32000:
+    if area > 25000 and aspect_ratio < 2.0 and aspect_ratio > 1.2:
       # save the first time you see a clueboard
       self.clueboard_time = rospy.Time.now().to_sec()
 
@@ -129,7 +130,7 @@ class state_manager:
           largest_contour = max(contours, key=cv2.contourArea)
           mask = np.zeros_like(gray_image)
           cv2.drawContours(mask, [largest_contour], -1, (255), cv2.FILLED)
-          removed_border_image = cv2.bitwise_and(clueboard_image, clueboard_image, mask=mask)
+          removed_border_image = cv2.bitwise_and(clueboard_image, clueboard_image, mask=mask) 
           borderless_h, borderless_w, _ = removed_border_image.shape
 
           # bounding boxes around words
@@ -148,7 +149,6 @@ class state_manager:
           for i, lc in enumerate(letter_contours):
 
             contour_area = cv2.contourArea(lc)
-            print(contour_area)
             if contour_area > 0:
               if image_area / contour_area < 500 and contour_area < 1000:
                 filtered_contours.append(lc)
@@ -170,12 +170,32 @@ class state_manager:
           bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
 
           sorted_contours = top_word + bottom_word
+          sorted_letters = []
 
           for i, lc in enumerate(sorted_contours):
             x, y, w, h = cv2.boundingRect(lc)
-            letter_roi = frame[y:y+h, x:x+w]
+            letter_aspect_ratio = w / h
+            # print(letter_aspect_ratio)
+            if borderless_h / h < 5.5 and borderless_h / h > 9.0:
+              sorted_contours.pop(i)
+              break
+            print(borderless_h / h)
+            
+            if letter_aspect_ratio > 1.0:
+              mid_x = (x + w) // 2
+              roi_box1 = frame[y:y+h, x:mid_x]
+              roi_box2 = frame[y:y+h, mid_x:x+w]
+              sorted_letters.append(roi_box1)
+              sorted_letters.append(roi_box2)
+            else:
+              letter_roi = frame[y:y+h, x:x+w]
+              sorted_letters.append(letter_roi)
 
-            cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), letter_roi)
+          for i, box_coords in enumerate(sorted_letters):
+            if box_coords.size != 0:
+              cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), box_coords)
+            else:
+              print(f"SKIP {i}")
 
           cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
           cv2.imshow('Bounding Boxes around Words', letter_image)
