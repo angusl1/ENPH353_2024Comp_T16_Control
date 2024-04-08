@@ -5,6 +5,7 @@ import roslib
 import sys
 import rospy
 import cv2 
+import os
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge, CvBridgeError
@@ -109,7 +110,7 @@ class state_manager:
         self.get_image = False
       return  
     
-    if area > 35000:
+    if area > 32000:
       # save the first time you see a clueboard
       self.clueboard_time = rospy.Time.now().to_sec()
 
@@ -121,7 +122,7 @@ class state_manager:
 
         # convert to grayscale
         gray_image = cv2.cvtColor(clueboard_image, cv2.COLOR_BGR2GRAY)
-        _, binary = cv2.threshold(gray_image, 240, 255, cv2.THRESH_BINARY)  
+        _, binary = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY)  
         binary_inverted = cv2.bitwise_not(binary)
 
         # remove white border
@@ -146,13 +147,15 @@ class state_manager:
 
           # filter contours by size to only get the letter contours not the outline of the word, and get rid of small blemishes
           filtered_contours = []
+          image_area = borderless_h * borderless_w
 
           for i, lc in enumerate(letter_contours):
 
             contour_area = cv2.contourArea(lc)
-
-            if contour_area > 100 and contour_area < 1000:
-              filtered_contours.append(lc)
+            print(contour_area)
+            if contour_area > 0:
+              if image_area / contour_area < 500 and contour_area < 1000:
+                filtered_contours.append(lc)
 
           # ordering contours: top words first then bottom words
           top_word = []
@@ -172,16 +175,11 @@ class state_manager:
 
           sorted_contours = top_word + bottom_word
 
-          print(borderless_h, borderless_w)
-
-          num_letters = len(sorted_contours)
-
           for i, lc in enumerate(sorted_contours):
             x, y, w, h = cv2.boundingRect(lc)
-            print(w, h)
             letter_roi = frame[y:y+h, x:x+w]
 
-            cv2.imwrite(f"letter_{i}.png", letter_roi)
+            cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), letter_roi)
 
           cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
           self.clueboard_count = self.clueboard_count + 1
@@ -264,9 +262,13 @@ class state_manager:
 
             # cv2.imshow('Transformed Image', pt_image)
 
-            # second blue mask 
+            # mask for letters
             hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
-            pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue, upper_blue)
+
+            lower_blue2 = np.array([115, 110, 50])
+            upper_blue2 = np.array([120, 255, 204])
+
+            pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue2, upper_blue2)
 
             blue_mask_resized = cv2.resize(pt_blue_mask, (pt_image.shape[1], pt_image.shape[0]))
 
@@ -274,7 +276,7 @@ class state_manager:
             bw_image = np.zeros_like(pt_image)
             bw_image[np.where(blue_mask_resized == 255)] = 255
 
-            # cv2.imshow('Black & White Image', bw_image)
+            cv2.imshow('Black & White Image', bw_image)
 
             self.get_letters(bw_image)
 
