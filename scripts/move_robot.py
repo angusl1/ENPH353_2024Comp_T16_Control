@@ -421,8 +421,8 @@ class state_manager:
           # Draw a red circle at the centroid position
           cv2.circle(mask, (cx1, cy1), radius=20, color=(0, 0, 255), thickness=-1)
 
-    cv2.imshow("Mask window", mask)
-    cv2.waitKey(3)
+    #cv2.imshow("Mask window", mask)
+    #cv2.waitKey(3)
 
     error = int(width/2) - cx1
 
@@ -513,10 +513,49 @@ class state_manager:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
            self.last_pink_time = rospy.get_time()
+        elif max_contour_area > 2000:
+           self.follow_pink(contours)              
 
-    # cv2.imshow("Mask window", red_mask)
-    # cv2.waitKey(3)
-  
+  def follow_pink(self, contours):
+    
+    # Find the contour with the largest area (assuming it's the path)
+    max_contour = max(contours, key=cv2.contourArea)
+
+    # Find the centroid of the largest contour
+    M = cv2.moments(max_contour)
+    if M['m00'] != 0:
+        cx = int(M['m10'] / M['m00'])
+        cy = int(M['m01'] / M['m00'])
+
+    #cv2.imshow("Mask window", gray_mask)
+    #cv2.waitKey(3)
+
+    error = 640 - cx
+
+    #PID well i guess only P
+    P = 0.020
+    I = 0.010
+    min_error = 25
+
+    twist = Twist()
+    twist.linear.x = 0.4
+
+    if np.abs(error) > min_error:
+      pass
+      twist.angular.z = P * error - I * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
+    
+    try:
+      self.vel_pub.publish(twist)
+    except CvBridgeError as e:
+      print(e)
+
+    self.detect_pink(self.cv_image)
+
+    
   def GrassFollowing(self,frame):
 
     kernel = np.ones((5,5),np.uint8)
@@ -575,7 +614,7 @@ class state_manager:
     error = int(width/2) - centroid_x
 
     #PID well i guess only P
-    P = 0.0225
+    P = 0.020
     I = 0.0125
     min_error = 25
 
@@ -664,7 +703,7 @@ class state_manager:
         if self.crosswalk:
           self.detect_crosswalk(self.cv_image) # Initiate a sequence if the crosswalk is detected
         elif self.pink_line_count < 3:
-          if rospy.get_time() - self.last_pink_time >= 3:
+          if rospy.get_time() - self.last_pink_time >= 5:
             self.detect_pink(self.cv_image)
 
       # End message
