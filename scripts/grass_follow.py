@@ -12,7 +12,12 @@ from geometry_msgs.msg import Twist
 from rosgraph_msgs.msg import Clock
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
+from PIL import Image as Img
+
+#import clue_model
 import numpy as np
+
+TEST_PATH = "letter_5.png"
 
 MAX_TIME = 1000
 
@@ -27,6 +32,8 @@ class state_manager:
 
     self.crosswalk = True # Flag for detecting crosswalk
     self.past_error = 0
+
+    # self.model = clue_model.clue_model()
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
@@ -124,55 +131,11 @@ class state_manager:
         except CvBridgeError as e:
           print(e)
 
-        # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
-        if self.crosswalk:
-
-          # Initiate a sequence if the crosswalk is detected
-          self.detect_crosswalk(self.cv_image)
-
-
       # End message
       self.comp_pub.publish("kappa, chungus, -1, DONE")
       
       # Stop the robot
       self.vel_pub.publish(self.stop_robot())
-
-  # Detect the crosswalk contour
-  def detect_crosswalk(self, frame):
-    height, width, _ = frame.shape
-    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    max_height = 300
-    bot_height = 0
-    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
-    cx = 0
-
-    # Define the lower and upper bounds for crosswalk line
-    lower_red = np.array([0, 50, 150])
-    upper_red = np.array([15, 255, 255])
-
-    # Create a mask for the crosswalk line
-    red_mask = cv2.inRange(roi_frame, lower_red, upper_red)
-
-    # Find contours in the mask
-    contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if contours:
-        # Find the area of the largest contour (assuming it's the crosswalk line)
-        max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
-        
-        # Check if area of max contour is large enough
-        if max_contour_area > 30000:
-           self.crosswalk = False
-           print(max_contour_area)
-           try:
-            self.vel_pub.publish(self.stop_robot())
-           except CvBridgeError as e:
-            print(e)
-           rospy.sleep(2)
-
-    #cv2.imshow("Mask window", red_mask)
-    #cv2.waitKey(3)
-    pass
 
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -189,14 +152,14 @@ class state_manager:
       msg.model_name = 'R1'
 
       msg.pose.position.x = 0.5
-      msg.pose.position.y = -0.5
+      msg.pose.position.y = -1.5
       msg.pose.position.z = 0.2
       msg.pose.orientation.x = 0
       msg.pose.orientation.y = 0
       msg.pose.orientation.z = 1
       msg.pose.orientation.w = 1
 
-      # msg.pose.position.x = 5.5
+      # msg.pose.position.x = 5
       # msg.pose.position.y = 2.5
       # msg.pose.position.z = 0.2
       # msg.pose.orientation.x = 0
@@ -216,7 +179,8 @@ class state_manager:
       except rospy.ServiceException:
           print ("Service call failed")
       
-      
+  # def testing(self):
+  #    print(self.model.predict(Img.open(TEST_PATH)))
 
 
 
@@ -224,6 +188,7 @@ def main(args):
   rospy.init_node('image_converter', anonymous=True)
   rob = state_manager()
   rob.reset_position()
+  #rob.testing()
   rob.start()
   # rospy.sleep(5)
   print("Shutting down")

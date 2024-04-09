@@ -34,6 +34,7 @@ class state_manager:
     self.pink_line_count = 0 # Flag for counting pink lines
     self.last_pink_time = 0 # Time at which last pink line was detected
     self.past_cb3 = False # Flag for passing clueboard 3
+    self.yoda_found = False
 
     self.past_error = 0 # For I in line following
     
@@ -516,6 +517,7 @@ class state_manager:
         elif max_contour_area > 2000:
            self.follow_pink(contours)              
 
+  # Follows the pink line
   def follow_pink(self, contours):
     
     # Find the contour with the largest area (assuming it's the path)
@@ -555,7 +557,7 @@ class state_manager:
 
     self.detect_pink(self.cv_image)
 
-    
+  # Follows the grass path
   def GrassFollowing(self,frame):
 
     kernel = np.ones((5,5),np.uint8)
@@ -627,6 +629,15 @@ class state_manager:
     
     return twist
 
+  # Detects if Yoda is near the pink line
+  def detect_yoda(self):
+    largest_yoda_contour = 1 
+    last_contour = 10
+    while last_contour/largest_yoda_contour > 0.9:
+       pass
+    
+    self.yoda_found = True
+  
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
       
