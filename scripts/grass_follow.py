@@ -42,21 +42,21 @@ class state_manager:
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
     max_height = 360 # 270
-    bot_height = 100
+    bot_height = 60
     roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
     centroid_x = width / 2
     centroid_y = height / 2
 
     # Define the lower and upper bounds for sides of the path
-    lower = np.array([24, 30, 180])   
-    upper = np.array([80, 74, 255]) 
+    lower = np.array([25, 30, 180])   
+    upper = np.array([80, 70, 215]) 
 
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
     # mask = cv2.erode(mask, kernel, iterations = 1)
     mask = cv2.dilate(mask, kernel, iterations = 3)
     mask = cv2.erode(mask, kernel, iterations = 3)
-    mask = cv2.dilate(mask, kernel, iterations = 1)
+    mask = cv2.dilate(mask, kernel, iterations = 5)
 
     # Find contours in the mask
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -90,12 +90,11 @@ class state_manager:
     error = int(width/2) - centroid_x
 
     #PID well i guess only P
-    P = 0.020
-    I = 0.010
+    P = 0.02
+    I = 0.01
     min_error = 25
 
     if np.abs(error) > min_error:
-      pass
       twist.angular.z = P * error - I * (error - self.past_error)
     else: 
       twist.angular.z = 0
