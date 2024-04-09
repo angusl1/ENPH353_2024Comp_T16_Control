@@ -29,7 +29,8 @@ class clue_model:
     def __init__(self):
 
         # Create a model and import weights
-        self.model = load_model("trained_model_no_opt.h5")
+        self.model = load_model('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/trained_model_no_opt.keras')
+        self.test_path = None
 
     # Creates a model with the license plate reader architecture
     def create_model(self):
@@ -60,12 +61,11 @@ class clue_model:
         x = x/255
         
         prediction = self.model.predict(x)[0].round(decimals=4)
-
-        return self.ascii_convert(prediction)
+        return str(self.ascii_convert(prediction))
     
-def main(args):
+def main(self,args):
   conv_model = clue_model()
-  image = Image.open(TEST_PATH).convert('RGB')
+  image = Image.open(self.test_path).convert('RGB')
   print(conv_model.predict(image))
 
 if __name__ == '__main__':
