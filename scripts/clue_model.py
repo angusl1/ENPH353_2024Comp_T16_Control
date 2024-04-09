@@ -20,16 +20,17 @@ from tensorflow.python.keras import layers
 from tensorflow.python.keras import models
 from tensorflow.python.keras import optimizers
 from tensorflow.python.keras.models import load_model
-from tensorflow.python.keras import backend
+from tensorflow.python.keras.backend import set_session
 
-TEST_PATH = "clueboard.jpg"
+TEST_PATH = "letter_2.png"
 
 class clue_model: 
     
     def __init__(self):
 
         # Create a model and import weights
-        self.model = load_model('trained_reader_no_opt.keras')
+        self.model = load_model('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/trained_model_no_opt.keras')
+        self.test_path = None
 
     # Creates a model with the license plate reader architecture
     def create_model(self):
@@ -48,7 +49,7 @@ class clue_model:
     def ascii_convert(self, prediction):
         location = np.argmax(prediction)
         if location <= 25:
-            return chr(location + 65)
+            return chr(location + 65) 
         else:
             return location - 26
         
@@ -58,13 +59,13 @@ class clue_model:
         x = np.asarray(img_aug)
         x = np.expand_dims(x, axis=0)
         x = x/255
-
+        
         prediction = self.model.predict(x)[0].round(decimals=4)
-        return self.ascii_convert(prediction)
+        return str(self.ascii_convert(prediction))
     
-def main(args):
+def main(self,args):
   conv_model = clue_model()
-  image = Image.open(TEST_PATH).convert('RGB')
+  image = Image.open(self.test_path).convert('RGB')
   print(conv_model.predict(image))
 
 if __name__ == '__main__':

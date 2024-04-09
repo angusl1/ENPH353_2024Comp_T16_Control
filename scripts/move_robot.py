@@ -13,6 +13,9 @@ from geometry_msgs.msg import Twist
 from rosgraph_msgs.msg import Clock
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SetModelState
+from PIL import Image as pil
+
+import clue_model as cmodel
 import numpy as np
 
 MAX_TIME = 1000
@@ -32,14 +35,18 @@ class state_manager:
     self.clueboard_count = 0 # Count for seen clueboard
     self.crosswalk = True # Flag for detecting crosswalk
     self.pink_line_count = 0 # Flag for counting pink lines
-    self.past_cb3 = False
+    self.last_pink_time = 0 # Time at which last pink line was detected
+    self.past_cb3 = False # Flag for passing clueboard 3
 
     self.past_error = 0 # For I in line following
+    self.num_letters = 0 # number of letters in a word
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
+
+    self.prediction_model = cmodel.clue_model()
 
   def RoadFollowing(self,frame):
 
@@ -107,7 +114,7 @@ class state_manager:
     aspect_ratio = width / height
 
     if self.get_image:
-      if (rospy.get_time() - self.clueboard_time) > 3.0:
+      if (rospy.get_time() - self.clueboard_time) > 7:
         self.get_image = False
       return  
     
@@ -194,17 +201,40 @@ class state_manager:
             else:
               letter_roi = frame[y:y+h, x:x+w]
               sorted_letters.append(letter_roi)
+          
+          prediction = ""
 
-          for i, box_coords in enumerate(sorted_letters):
-            if box_coords.size != 0:
-              cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), box_coords)
+          try:
+            self.vel_pub.publish(self.stop_robot())
+          except CvBridgeError as e:
+            print(e)
+
+          for i, letter in enumerate(sorted_letters):
+            if letter.size != 0:
+              letter_pil = pil.fromarray(letter)
+              cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), letter)
+              prediction_letter = self.prediction_model.predict(letter_pil)
+              prediction = prediction + prediction_letter
+              print(prediction)
             else:
               print(f"SKIP {i}")
+          
+          score_tuple = ("kappa", "chungus", str(self.clueboard_count+1), str(prediction))
+          score_msg = ",".join(score_tuple)
+          self.comp_pub.publish(score_msg)
 
           cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
           self.clueboard_count = self.clueboard_count + 1
           print("Clueboard count: " ,(self.clueboard_count))
           cv2.imshow('Bounding Boxes around Words', letter_image)
+
+          # self.num_letters = len(sorted_letters)
+          # #print("Number of letters: ", (self.num_letters))
+
+          #   # letter_path = os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png")
+          # print(prediction)
+          # prediction = self.my_model.predict(letter_image)
+          # print(prediction)
 
       self.get_image = True
 
@@ -340,7 +370,7 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 30000:
+        if max_contour_area > 60000:
            print("Sidewalk Red Line Area: " ,(max_contour_area))
            try:
             self.vel_pub.publish(self.stop_robot())
@@ -351,7 +381,6 @@ class state_manager:
 
     # cv2.imshow("Mask window", red_mask)
     cv2.waitKey(3)
-    pass
 
   def pedestrian_avoidance(self, frame):
     # Define region of interest
@@ -441,8 +470,8 @@ class state_manager:
           # Draw a red circle at the centroid position
           cv2.circle(mask, (cx1, cy1), radius=20, color=(0, 0, 255), thickness=-1)
 
-    cv2.imshow("Mask window", mask)
-    cv2.waitKey(3)
+    #cv2.imshow("Mask window", mask)
+    #cv2.waitKey(3)
 
     error = int(width/2) - cx1
 
@@ -505,6 +534,147 @@ class state_manager:
            
     return self.roundabout_follow(frame) # Return a road following twist if the truck contour is not found
         
+  # Looks for the pink line and increments counter
+  def detect_pink(self, frame):
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    max_height = 300
+    bot_height = 0
+    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+    cx = 0
+
+    # Define the lower and upper bounds for pink line
+    lower_red = np.array([150, 180, 128])
+    upper_red = np.array([170, 255, 255])
+
+    # Create a mask for the crosswalk line
+    red_mask = cv2.inRange(roi_frame, lower_red, upper_red)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        # Find the area of the largest contour (assuming it's the crosswalk line)
+        max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
+        
+        # Check if area of max contour is large enough
+        if max_contour_area > 50000:
+           print("Pink Line Detected.\nArea:" ,(max_contour_area))
+           self.pink_line_count = self.pink_line_count + 1
+           self.last_pink_time = rospy.get_time()
+        elif max_contour_area > 2000:
+           self.follow_pink(contours)              
+
+  def follow_pink(self, contours):
+    
+    # Find the contour with the largest area (assuming it's the path)
+    max_contour = max(contours, key=cv2.contourArea)
+
+    # Find the centroid of the largest contour
+    M = cv2.moments(max_contour)
+    if M['m00'] != 0:
+        cx = int(M['m10'] / M['m00'])
+        cy = int(M['m01'] / M['m00'])
+
+    #cv2.imshow("Mask window", gray_mask)
+    #cv2.waitKey(3)
+
+    error = 640 - cx
+
+    #PID well i guess only P
+    P = 0.020
+    I = 0.010
+    min_error = 25
+
+    twist = Twist()
+    twist.linear.x = 0.4
+
+    if np.abs(error) > min_error:
+      pass
+      twist.angular.z = P * error - I * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
+    
+    try:
+      self.vel_pub.publish(twist)
+    except CvBridgeError as e:
+      print(e)
+
+    self.detect_pink(self.cv_image)
+
+    
+  def GrassFollowing(self,frame):
+
+    kernel = np.ones((5,5),np.uint8)
+
+    twist = Twist()
+    twist.linear.x = 0.3
+
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    max_height = 360 # 270
+    bot_height = 60
+    roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+    centroid_x = width / 2
+    centroid_y = height / 2
+
+    # Define the lower and upper bounds for sides of the path
+    lower = np.array([25, 30, 180])   
+    upper = np.array([80, 70, 215]) 
+
+    # Create a mask for path sides and remove noise
+    mask = cv2.inRange(roi_frame, lower, upper)
+    # mask = cv2.erode(mask, kernel, iterations = 1)
+    mask = cv2.dilate(mask, kernel, iterations = 3)
+    mask = cv2.erode(mask, kernel, iterations = 3)
+    mask = cv2.dilate(mask, kernel, iterations = 5)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if len(contours) >= 2:
+        # Find the contour with the largest area (assuming it's the path)
+        contours = sorted(contours, key=cv2.contourArea, reverse=True)
+        
+        # Remove the largest contour to find the second largest contour (assume other side of path)
+        max_contour1 = contours[0]
+        max_contour2 = contours[1]
+
+        # Find the centroid of the largest contour
+        M1 = cv2.moments(max_contour1)
+        M2 = cv2.moments(max_contour2)
+
+        if M1['m00'] != 0 and M2['m00'] != 0:
+            cx1 = int(M1['m10'] / M1['m00'])
+            cy1 = int(M1['m01'] / M1['m00'])
+            cx2 = int(M2['m10'] / M2['m00'])
+            cy2 = int(M2['m01'] / M2['m00'])
+
+            centroid_x = int(np.average([cx1, cx2]))
+            centroid_y = int(np.average([cy1, cy2]))
+            # Draw a red circle at the centroid position
+            cv2.circle(mask, (centroid_x, centroid_y), radius=20, color=(0, 0, 255), thickness=-1)
+
+    cv2.imshow("Mask window", mask)
+    cv2.waitKey(3)
+
+    error = int(width/2) - centroid_x
+
+    #PID well i guess only P
+    P = 0.020
+    I = 0.0125
+    min_error = 25
+
+    if np.abs(error) > min_error:
+      twist.angular.z = P * error - I * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
+    
+    return twist
 
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -524,6 +694,7 @@ class state_manager:
 
     return twist
 
+  # Teleports the robot to the start of the course
   def reset_position(self):
 
       msg = ModelState()
@@ -568,14 +739,21 @@ class state_manager:
             print(e)
         elif self.pink_line_count == 1: 
            # TODO move the grass following code here
-           pass
+          try:
+            self.vel_pub.publish(self.GrassFollowing(self.cv_image))
+          except CvBridgeError as e:
+            print(e)
+        elif self.pink_line_count == 2:
+           self.vel_pub.publish(self.stop_robot())
         
         self.find_clueboard(self.cv_image)
 
         # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
         if self.crosswalk:
-          # Initiate a sequence if the crosswalk is detected
-          self.detect_crosswalk(self.cv_image)
+          self.detect_crosswalk(self.cv_image) # Initiate a sequence if the crosswalk is detected
+        elif self.pink_line_count < 3:
+          if rospy.get_time() - self.last_pink_time >= 5:
+            self.detect_pink(self.cv_image)
 
       # End message
       self.comp_pub.publish("kappa, chungus, -1, DONE")
