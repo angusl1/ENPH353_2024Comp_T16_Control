@@ -109,26 +109,11 @@ class state_manager:
     
     return twist
   
-  # cleans up image by removing border then gets images of letters and puts them in a separate file
-  def get_letters(self, frame):
-    height, width, _ = frame.shape
-    area = height * width
-    aspect_ratio = width / height
-
-    if self.get_image:
-      if (rospy.get_time() - self.clueboard_time) > 7:
-        self.get_image = False
-      return  
-    
-    if area > 25000 and aspect_ratio < 2.0 and aspect_ratio > 1.2:
-      # save the first time you see a clueboard
-      self.clueboard_time = rospy.Time.now().to_sec()
-
-      cv2.imwrite('clueboard.jpg', frame)
+  # removes white border of images
+  def crop_border(self):
       clueboard_image = cv2.imread('clueboard.jpg')
 
       if clueboard_image is not None:
-        # cv2.imshow('Clueboard Image', clueboard_image)
 
         # convert to grayscale
         gray_image = cv2.cvtColor(clueboard_image, cv2.COLOR_BGR2GRAY)
@@ -144,99 +129,115 @@ class state_manager:
           mask = np.zeros_like(gray_image)
           cv2.drawContours(mask, [largest_contour], -1, (255), cv2.FILLED)
           removed_border_image = cv2.bitwise_and(clueboard_image, clueboard_image, mask=mask) 
-          borderless_h, borderless_w, _ = removed_border_image.shape
+          return removed_border_image
+        
+      return clueboard_image
 
-          # bounding boxes around words
-          letters_gray = cv2.cvtColor(removed_border_image, cv2.COLOR_BGR2GRAY)
+  # cleans up image by removing border then gets images of letters and puts them in a separate file
+  def get_letters(self, frame):
+    height, width, _ = frame.shape
+    area = height * width
+    aspect_ratio = width / height
 
-          letter_binary = cv2.adaptiveThreshold(letters_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 4)
+    if self.get_image:
+      if (rospy.get_time() - self.clueboard_time) > 7:
+        self.get_image = False
+      return  
+    
+    if area > 20000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
+      # save the first time you see a clueboard
+      self.clueboard_time = rospy.Time.now().to_sec()
 
-          letter_contours, _ = cv2.findContours(letter_binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+      cv2.imwrite('clueboard.jpg', frame)
+      clueboard_image = cv2.imread('clueboard.jpg')
 
-          letter_image = removed_border_image.copy()
+      if clueboard_image is not None:
+        removed_border_image = self.crop_border()
+        borderless_h, borderless_w, _ = removed_border_image.shape
 
-          # filter contours by size to only get the letter contours not the outline of the word, and get rid of small blemishes
-          filtered_contours = []
-          image_area = borderless_h * borderless_w
+        # bounding boxes around words
+        letters_gray = cv2.cvtColor(removed_border_image, cv2.COLOR_BGR2GRAY)
 
-          for i, lc in enumerate(letter_contours):
+        letter_binary = cv2.adaptiveThreshold(letters_gray, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 11, 4)
 
-            contour_area = cv2.contourArea(lc)
-            if contour_area > 0:
-              if image_area / contour_area < 500 and contour_area < 1000:
-                filtered_contours.append(lc)
+        letter_contours, _ = cv2.findContours(letter_binary, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
-          # ordering contours: top words first then bottom words
-          top_word = []
-          bottom_word = []
+        letter_image = removed_border_image.copy()
 
-          filtered_contours = sorted(filtered_contours, key=lambda c: cv2.boundingRect(c)[1])
+        # filter contours by size to only get the letter contours not the outline of the word, and get rid of small blemishes
+        filtered_contours = []
+        image_area = borderless_h * borderless_w
 
-          for lc in filtered_contours:
-            _, y1, _, _ = cv2.boundingRect(lc)
-            if y1 < frame.shape[0] / 2:
-              top_word.append(lc)
-            else:
-               bottom_word.append(lc)
+        for i, lc in enumerate(letter_contours):
 
-          top_word = sorted(top_word, key=lambda c: cv2.boundingRect(c)[0])  
-          bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
+          contour_area = cv2.contourArea(lc)
+          if contour_area > 0:
+            if image_area / contour_area < 500 and contour_area < 1000:
+              filtered_contours.append(lc)
 
-          sorted_contours = top_word + bottom_word
-          sorted_letters = []
+        # ordering contours: top words first then bottom words
+        top_word = []
+        bottom_word = []
 
-          for i, lc in enumerate(sorted_contours):
-            x, y, w, h = cv2.boundingRect(lc)
-            letter_aspect_ratio = w / h
-            # print(letter_aspect_ratio)
-            if borderless_h / h < 5.5 and borderless_h / h > 9.0:
-              sorted_contours.pop(i)
-              break
-            print(borderless_h / h)
-            
-            if letter_aspect_ratio > 1.0:
-              mid_x = (x + w) // 2
-              roi_box1 = frame[y:y+h, x:mid_x]
-              roi_box2 = frame[y:y+h, mid_x:x+w]
-              sorted_letters.append(roi_box1)
-              sorted_letters.append(roi_box2)
-            else:
-              letter_roi = frame[y:y+h, x:x+w]
-              sorted_letters.append(letter_roi)
-          
-          prediction = ""
+        filtered_contours = sorted(filtered_contours, key=lambda c: cv2.boundingRect(c)[1])
 
-          try:
-            self.vel_pub.publish(self.stop_robot())
-          except CvBridgeError as e:
-            print(e)
+        for lc in filtered_contours:
+          _, y1, _, _ = cv2.boundingRect(lc)
+          if y1 < frame.shape[0] / 2:
+            top_word.append(lc)
+          else:
+            bottom_word.append(lc)
 
-          for i, letter in enumerate(sorted_letters):
-            if letter.size != 0:
-              letter_pil = pil.fromarray(letter)
-              cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), letter)
-              prediction_letter = self.prediction_model.predict(letter_pil)
-              prediction = prediction + prediction_letter
-              print(prediction)
-            else:
-              print(f"SKIP {i}")
-          
-          score_tuple = ("kappa", "chungus", str(self.clueboard_count+1), str(prediction))
-          score_msg = ",".join(score_tuple)
-          self.comp_pub.publish(score_msg)
+        top_word = sorted(top_word, key=lambda c: cv2.boundingRect(c)[0])  
+        bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
 
-          cv2.drawContours(letter_image, sorted_contours, -1, (0, 0, 255), 1)
-          self.clueboard_count = self.clueboard_count + 1
-          print("Clueboard count: " ,(self.clueboard_count))
-          cv2.imshow('Bounding Boxes around Words', letter_image)
+        sorted_letters = []
 
-          # self.num_letters = len(sorted_letters)
-          # #print("Number of letters: ", (self.num_letters))
+        for i, lc in enumerate(bottom_word):
+          x, y, w, h = cv2.boundingRect(lc)
 
-          #   # letter_path = os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png")
-          # print(prediction)
-          # prediction = self.my_model.predict(letter_image)
-          # print(prediction)
+          if borderless_h / h < 6.5 or borderless_h / h > 9.0:
+            bottom_word.pop(i)
+
+        for lc in bottom_word:
+          x, y, w, h = cv2.boundingRect(lc)
+          letter_aspect_ratio = w / h
+
+          if letter_aspect_ratio > 1.0:
+            mid_x = x + w // 2
+            roi_box1 = frame[y:y+h, x:mid_x]
+            roi_box2 = frame[y:y+h, mid_x:x+w]
+            sorted_letters.append(roi_box1)
+            sorted_letters.append(roi_box2)
+          else:
+            letter_roi = frame[y:y+h, x:x+w]
+            sorted_letters.append(letter_roi)
+        
+        prediction = ""
+
+        try:
+          self.vel_pub.publish(self.stop_robot())
+        except CvBridgeError as e:
+          print(e)
+
+        for i, letter in enumerate(sorted_letters):
+          if letter.size != 0:
+            letter_pil = pil.fromarray(letter)
+            cv2.imwrite(os.path.join('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/letters', f"letter_{i}.png"), letter)
+            prediction_letter = self.prediction_model.predict(letter_pil)
+            prediction = prediction + prediction_letter
+            print(prediction)
+          else:
+            print(f"SKIP {i}")
+        
+        score_tuple = ("kappa", "chungus", str(self.clueboard_count+1), str(prediction))
+        score_msg = ",".join(score_tuple)
+        self.comp_pub.publish(score_msg)
+
+        cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
+        self.clueboard_count = self.clueboard_count + 1
+        print("Clueboard count: " ,(self.clueboard_count))
+        cv2.imshow('Bounding Boxes around Words', letter_image)
 
       self.get_image = True
 
@@ -267,8 +268,6 @@ class state_manager:
         x, y, w, h = cv2.boundingRect(largest_clueboard)
 
         cropped_image = frame[y:y+h, x:x+w]
-
-        # cv2.imshow('Cropped Image', cropped_image)
 
         # polygon approximation of clueboard
         epsilon = 0.05 * cv2.arcLength(largest_clueboard, True)
@@ -312,8 +311,6 @@ class state_manager:
             pt_matrix = cv2.getPerspectiveTransform(pts1, pts2)
             pt_image = cv2.warpPerspective(frame, pt_matrix, (row, col))
 
-            # cv2.imshow('Transformed Image', pt_image)
-
             # mask for letters
             hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
 
@@ -327,8 +324,6 @@ class state_manager:
             # turn transformed image black and white
             bw_image = np.zeros_like(pt_image)
             bw_image[np.where(blue_mask_resized == 255)] = 255
-
-            cv2.imshow('Black & White Image', bw_image)
 
             self.get_letters(bw_image)
 
@@ -457,7 +452,7 @@ class state_manager:
     if contours:
     # Find the contour with the largest area (assuming it's the path)
       max_contour = max(contours, key=cv2.contourArea)
-      print(cv2.contourArea(max_contour))
+      # print(cv2.contourArea(max_contour))
 
       if cv2.contourArea(max_contour) > 300000:
          twist.angular.z = 5
@@ -528,7 +523,7 @@ class state_manager:
       
         # Stop the robot if the truck is too close
         if cv2.contourArea(max_contour) > 10000:
-           cv2.imshow("Truck window", mask)
+          # cv2.imshow("Truck window", mask)
            cv2.waitKey(3)
            return self.stop_robot()
         else:
@@ -660,7 +655,7 @@ class state_manager:
             # Draw a red circle at the centroid position
             cv2.circle(mask, (centroid_x, centroid_y), radius=20, color=(0, 0, 255), thickness=-1)
 
-    cv2.imshow("Mask window", mask)
+    # cv2.imshow("Mask window", mask)
     cv2.waitKey(3)
 
     error = int(width/2) - centroid_x
