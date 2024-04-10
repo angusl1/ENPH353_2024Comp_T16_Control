@@ -557,7 +557,7 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 50000:
+        if max_contour_area > 20000:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
            print("Pink line count:", self.pink_line_count)
@@ -664,11 +664,8 @@ class state_manager:
 
     error = int(width/2) - centroid_x
 
-    if error < 0 or velocity == 0:
-    #PID well i guess only P
-      P = 0.020
-    else:
-      P = 0.015
+    # PID well i guess only P
+    P = 0.020
     #I = 0.015
     D = 0.0125
     min_error = 25
@@ -779,7 +776,7 @@ class state_manager:
     
     while self.clueboard_count == clueboard_start_count:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.3))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.275))
       except CvBridgeError as e:
         print(e)
       self.find_clueboard(self.cv_image)
@@ -865,7 +862,7 @@ class state_manager:
         elif self.pink_line_count == 2:
           if self.yoda_found == False:
             self.vel_pub.publish(self.forward_robot())
-            rospy.sleep(0.25)
+            rospy.sleep(0.35)
             self.vel_pub.publish(self.stop_robot())
             self.detect_yoda()
           else: 
