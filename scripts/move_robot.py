@@ -18,7 +18,7 @@ from PIL import Image as pil
 import clue_model as cmodel
 import numpy as np
 
-MAX_TIME = 240
+MAX_TIME = 1000
 
 class state_manager:
   def __init__(self):
@@ -41,13 +41,13 @@ class state_manager:
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
-
-    self.prediction_model = cmodel.clue_model()
-
+    
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
+
+    self.prediction_model = cmodel.clue_model()
 
   def RoadFollowing(self,frame):
 
@@ -143,7 +143,7 @@ class state_manager:
         self.get_image = False
       return  
     
-    if area > 20000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
+    if area > 15000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
       # save the first time you see a clueboard
       self.clueboard_time = rospy.Time.now().to_sec()
 
@@ -197,6 +197,8 @@ class state_manager:
 
           if borderless_h / h < 6.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
+
+          print(borderless_h / h)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
@@ -313,7 +315,7 @@ class state_manager:
             # mask for letters
             hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
 
-            lower_blue2 = np.array([115, 110, 50])
+            lower_blue2 = np.array([115, 90, 30])
             upper_blue2 = np.array([120, 255, 204])
 
             pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue2, upper_blue2)
@@ -554,7 +556,7 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 30000:
+        if max_contour_area > 50000:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
            self.last_pink_time = rospy.get_time()
@@ -673,88 +675,14 @@ class state_manager:
     
     return twist
 
-  def yoda_follow(self,frame):
-
-    twist = Twist()
-    twist.linear.x = 0.4
-
-    height, width, _ = frame.shape
-    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    cx = 0
-
-    # Define the lower and upper bounds for sides of the path
-    lower = np.array([130, 0, 0])
-    upper = np.array([180, 75, 75])
-
-    # Create a mask for path sides and remove noise
-    mask = cv2.inRange(hsv_frame, lower, upper)
-
-    # Find contours in the mask
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    if contours:
-        # Remove the largest contour to find the second largest contour (assume other side of path)
-        max_contour = max(contours, key=cv2.contourArea)
-
-        if cv2.contourArea(max_contour) > 6000:
-           return self.stop_robot()  
-        # Find the centroid of the largest contour
-        M = cv2.moments(max_contour)
-        if M['m00'] != 0:
-            cx = int(M['m10'] / M['m00'])
-            cy = int(M['m01'] / M['m00'])
-
-    error = int(width/2) - cx
-
-    #PID well i guess only P
-    P = 0.02
-    I = 0.01
-    min_error = 25
-
-    if np.abs(error) > min_error:
-      twist.angular.z = P * error - I * (error - self.past_error)
-    else: 
-      twist.angular.z = 0
-
-    self.past_error = error
-    
-    return twist
-  
+  # Detects if Yoda is near the pink line
   def detect_yoda(self):
-    largest_yoda_contour = 10
-    last_contour = 1
-    while last_contour/largest_yoda_contour > 0.9 and largest_yoda_contour < 5000:
-
-      hsv_frame = cv2.cvtColor(self.cv_image, cv2.COLOR_BGR2HSV)
-      cx = 0
-
-      # Define the lower and upper bounds for brown
-      lower = np.array([130, 0, 0])
-      upper = np.array([180, 75, 75])
-
-      # Create a mask for the gray path
-      mask = cv2.inRange(hsv_frame, lower, upper)
-
-      # Find contours in the mask
-      contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-      if contours:
-          # Find the contour with the largest area (assuming it's the path)
-          max_contour = max(contours, key=cv2.contourArea)
-          max_contour_area = cv2.contourArea(max_contour)
-          
-          if max_contour_area > largest_yoda_contour:
-             largest_yoda_contour = max_contour_area
-
-          last_contour = max_contour_area
-          print("Largest:", largest_yoda_contour, "Last:", last_contour)
-      
-      cv2.imshow("YodaCam", mask)
-      cv2.waitKey(3)
-      rospy.sleep(0.033)
+    largest_yoda_contour = 1 
+    last_contour = 10
+    while last_contour/largest_yoda_contour > 0.9:
+       pass
     
     self.yoda_found = True
-
   
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -818,23 +746,13 @@ class state_manager:
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 1: 
+           # TODO move the grass following code here
           try:
             self.vel_pub.publish(self.GrassFollowing(self.cv_image))
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 2:
-          if self.yoda_found == False:
-            self.detect_yoda()
-          else: 
-            try:
-              self.vel_pub.publish(self.yoda_follow(self.cv_image))
-            except CvBridgeError as e:
-              print(e)
-        else: 
-          try:
-            self.vel_pub.publish(self.GrassFollowing(self.cv_image))
-          except CvBridgeError as e:
-            print(e)
+           self.vel_pub.publish(self.stop_robot())
         
         self.find_clueboard(self.cv_image)
 
