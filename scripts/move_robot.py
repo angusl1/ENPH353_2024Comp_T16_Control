@@ -39,6 +39,7 @@ class state_manager:
     self.past_cb3 = False # Flag for passing clueboard 3
     self.yoda_found = False # Flag for detecting if Yoda has been found
     self.tunnel_flag = False # False if tunnel not passed
+    self.finished_flag = False
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
@@ -606,8 +607,7 @@ class state_manager:
 
     self.detect_pink(self.cv_image)
 
-  # Follows the grass path
-  def GrassFollowing(self,frame,velocity):
+  def GrassFollowing(self,frame,velocity,num_cont):
 
     kernel = np.ones((5,5),np.uint8)
 
@@ -616,62 +616,79 @@ class state_manager:
 
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    max_height = 300 # 270
-    bot_height = 0
+    max_height = 360 # 270
+    bot_height = 60
     roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
     centroid_x = width / 2
     centroid_y = height / 2
 
     # Define the lower and upper bounds for sides of the path
     lower = np.array([25, 30, 180])   
-    upper = np.array([80, 70, 215]) 
+    upper = np.array([60, 70, 255]) 
 
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
     # mask = cv2.erode(mask, kernel, iterations = 1)
-    mask = cv2.dilate(mask, kernel, iterations = 6)
-    # mask = cv2.erode(mask, kernel, iterations = 3)
-    # mask = cv2.dilate(mask, kernel, iterations = 5)
+    mask = cv2.dilate(mask, kernel, iterations = 1)
 
     # Find contours in the mask
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-    if len(contours) >= 2:
+    max_contour = np.zeros((max_height-bot_height, width, 1), dtype=np.uint8)
+
+    if len(contours) >= num_cont:
         # Find the contour with the largest area (assuming it's the path)
         contours = sorted(contours, key=cv2.contourArea, reverse=True)
         
         # Remove the largest contour to find the second largest contour (assume other side of path)
-        max_contour1 = contours[0]
-        max_contour2 = contours[1]
+        for i in range(0, num_cont):
+           cv2.drawContours(max_contour, contours, i, (255, 255, 255), thickness=-1)
 
-        # Find the centroid of the largest contour
-        M1 = cv2.moments(max_contour1)
-        M2 = cv2.moments(max_contour2)
+        max_contour = cv2.dilate(max_contour, kernel, iterations = 8)
 
-        if M1['m00'] != 0 and M2['m00'] != 0:
-            cx1 = int(M1['m10'] / M1['m00'])
-            cy1 = int(M1['m01'] / M1['m00'])
-            cx2 = int(M2['m10'] / M2['m00'])
-            cy2 = int(M2['m01'] / M2['m00'])
+        # m1 = cv2.moments(max_contour)
+        # if m1['m00'] != 0:
+        #    centroid_x = int(m1['m10'] / m1['m00'])
+        #    centroid_y = int(m1['m01'] / m1['m00'])
+        
+        contours, _ = cv2.findContours(max_contour, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-            centroid_x = int(np.average([cx1, cx2]))
-            centroid_y = int(np.average([cy1, cy2]))
-            # Draw a red circle at the centroid position
-            cv2.circle(mask, (centroid_x, centroid_y), radius=20, color=(0, 0, 255), thickness=-1)
+        if len(contours) >= 2:
+            # Find the contour with the largest area (assuming it's the path)
+            contours = sorted(contours, key=cv2.contourArea, reverse=True)
+            
+            # Remove the largest contour to find the second largest contour (assume other side of path)
+            max_contour1 = contours[0]
+            max_contour2 = contours[1]
 
-    # cv2.imshow("Mask window", mask)
+            # Find the centroid of the largest contours
+            M1 = cv2.moments(max_contour1)
+            M2 = cv2.moments(max_contour2)
+
+            if M1['m00'] != 0 and M2['m00'] != 0:
+                cx1 = int(M1['m10'] / M1['m00'])
+                cy1 = int(M1['m01'] / M1['m00'])
+                cx2 = int(M2['m10'] / M2['m00'])
+                cy2 = int(M2['m01'] / M2['m00'])
+
+                centroid_x = int(np.average([cx1, cx2]))
+                centroid_y = int(np.average([cy1, cy2]))
+
+    cv2.imshow("Contour window", max_contour)
     cv2.waitKey(3)
+
+    # cv2.imshow("Mask", mask)
+    # cv2.waitKey(3)
 
     error = int(width/2) - centroid_x
 
-    # PID well i guess only P
-    P = 0.020
-    #I = 0.015
-    D = 0.0125
+    #PID well i guess only P
+    P = 0.02
+    I = 0.0125
     min_error = 25
 
     if np.abs(error) > min_error:
-      twist.angular.z = P * error - D * (error - self.past_error)
+      twist.angular.z = P * error - I * (error - self.past_error)
     else: 
       twist.angular.z = 0
 
@@ -767,22 +784,27 @@ class state_manager:
     clueboard_start_count = self.clueboard_count
     while rospy.get_time() - tunnel_start_time < 1:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 4))
       except CvBridgeError as e:
         print(e)
+
+    self.vel_pub.publish(self.forward_robot())
+    rospy.sleep(0.4)
+
+    self.vel_pub.publish(self.rotate_left())
+    rospy.sleep(0.275)
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
     
     while self.clueboard_count == clueboard_start_count:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.275))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
       except CvBridgeError as e:
         print(e)
       self.find_clueboard(self.cv_image)
 
-    self.comp_pub.publish("kappa,chungus,-1,ZANIEL")
-    self.vel_pub.publish(self.stop_robot())
+    self.finished_flag = True
     
   
   # Return a twist object which renders the robot stationary
@@ -836,7 +858,7 @@ class state_manager:
   def start(self):
       
       # Set time limit for run
-      while (not rospy.is_shutdown()) and (rospy.get_time() - self.start_time < MAX_TIME):
+      while (not rospy.is_shutdown()) and (rospy.get_time() - self.start_time < MAX_TIME) and self.finished_flag == False:
 
         # Show camera feed
         # cv2.imshow("Image window", self.cv_image)
@@ -856,7 +878,7 @@ class state_manager:
         elif self.pink_line_count == 1: 
            # TODO move the grass following code here
           try:
-            self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.3))
+            self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 5))
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 2:
