@@ -43,6 +43,7 @@ class state_manager:
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
+    self.area_threshold = 25000
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
@@ -145,7 +146,7 @@ class state_manager:
         self.get_image = False
       return  
     
-    if area > 15000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
+    if area > self.area_threshold and aspect_ratio < 2.0 and aspect_ratio > 1.0:
       # save the first time you see a clueboard
       self.clueboard_time = rospy.Time.now().to_sec()
 
@@ -199,19 +200,28 @@ class state_manager:
 
           if borderless_h / h < 6.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
-
-          print(borderless_h / h)
+            print(borderless_h / h)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
           letter_aspect_ratio = w / h
+          print(letter_aspect_ratio)
 
-          if letter_aspect_ratio > 1.0:
+          if letter_aspect_ratio > 1.0 and letter_aspect_ratio < 1.51:
             mid_x = x + w // 2
             roi_box1 = frame[y:y+h, x:mid_x]
             roi_box2 = frame[y:y+h, mid_x:x+w]
             sorted_letters.append(roi_box1)
             sorted_letters.append(roi_box2)
+          elif letter_aspect_ratio > 1.51:
+            third_x = x + w // 3
+            two_third_x = x + 2 * w // 3
+            roi_box11 = frame[y:y+h, x:third_x]
+            roi_box12 = frame[y:y+h, third_x:two_third_x]
+            roi_box13 = frame[y:y+h, two_third_x:x+w]
+            sorted_letters.append(roi_box11)
+            sorted_letters.append(roi_box12)
+            sorted_letters.append(roi_box13)
           else:
             letter_roi = frame[y:y+h, x:x+w]
             sorted_letters.append(letter_roi)
@@ -238,9 +248,14 @@ class state_manager:
         self.comp_pub.publish(score_msg)
 
         cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
+        cv2.imshow('Bounding Boxes around letters', letter_image)
+
+        area_thresholds = [25000, 18000, 18000, 15000, 16000, 16000, 20000]
+        self.area_threshold = area_thresholds[self.clueboard_count]
+        print(self.area_threshold)
+
         self.clueboard_count = self.clueboard_count + 1
         print("Clueboard count: " ,(self.clueboard_count))
-        cv2.imshow('Bounding Boxes around Words', letter_image)
 
       self.get_image = True
 
@@ -771,9 +786,9 @@ class state_manager:
              largest_yoda_contour = max_contour_area
 
           last_contour = max_contour_area
-          print("Largest:", largest_yoda_contour, "Last:", last_contour)
+          # print("Largest:", largest_yoda_contour, "Last:", last_contour)
       
-      cv2.imshow("YodaCam", mask)
+      # cv2.imshow("YodaCam", mask)
       cv2.waitKey(3)
     
     self.yoda_found = True
