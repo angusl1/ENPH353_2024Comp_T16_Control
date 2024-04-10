@@ -53,7 +53,7 @@ class state_manager:
   def RoadFollowing(self,frame):
 
     twist = Twist()
-    twist.linear.x = 0.4
+    twist.linear.x = 0.35
 
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -494,7 +494,7 @@ class state_manager:
     # Make sure we are past the 3rd clueboard
     if self.past_cb3 == False:
       cb3_time = rospy.get_time()
-      wait_timer = 2.4
+      wait_timer = 3
       while rospy.get_time() - cb3_time < wait_timer:
         try:
           self.vel_pub.publish(self.RoadFollowing(self.cv_image))
@@ -522,7 +522,7 @@ class state_manager:
         max_contour = max(contours, key=cv2.contourArea)
       
         # Stop the robot if the truck is too close
-        if cv2.contourArea(max_contour) > 10000:
+        if cv2.contourArea(max_contour) > 5000:
           # cv2.imshow("Truck window", mask)
            cv2.waitKey(3)
            return self.stop_robot()
@@ -558,8 +558,10 @@ class state_manager:
         if max_contour_area > 30000:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
+           print("Pink line count:", self.pink_line_count)
            self.last_pink_time = rospy.get_time()
-        elif max_contour_area > 1000:
+        elif max_contour_area > 500:
+           self.find_clueboard(frame)
            self.follow_pink(contours)              
 
   # Follows the pink line
@@ -603,12 +605,12 @@ class state_manager:
     self.detect_pink(self.cv_image)
 
   # Follows the grass path
-  def GrassFollowing(self,frame):
+  def GrassFollowing(self,frame,velocity):
 
     kernel = np.ones((5,5),np.uint8)
 
     twist = Twist()
-    twist.linear.x = 0.3
+    twist.linear.x = velocity
 
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
@@ -660,8 +662,11 @@ class state_manager:
 
     error = int(width/2) - centroid_x
 
+    if error < 0 or velocity == 0:
     #PID well i guess only P
-    P = 0.020
+      P = 0.020
+    else:
+      P = 0.015
     #I = 0.015
     D = 0.0125
     min_error = 25
@@ -727,7 +732,7 @@ class state_manager:
   def detect_yoda(self):
     largest_yoda_contour = 10
     last_contour = 1
-    while last_contour/largest_yoda_contour > 0.9 or largest_yoda_contour < 3000:
+    while not rospy.is_shutdown() and (last_contour/largest_yoda_contour > 0.9 or largest_yoda_contour < 3000):
       hsv_frame = cv2.cvtColor(self.cv_image, cv2.COLOR_BGR2HSV)
       cx = 0
 
@@ -759,14 +764,27 @@ class state_manager:
 
   # Hard-coded Tunnel Sequence
   def tunnel(self):
-    self.vel_pub.publish(self.stop_robot())
-    self.vel_pub.publish(self.forward_robot())
-    rospy.sleep(0.7)
-    self.vel_pub.publish(self.rotate_left())
-    rospy.sleep(0.31)
+    tunnel_start_time = rospy.get_time()
+    clueboard_start_count = self.clueboard_count
+    while rospy.get_time() - tunnel_start_time < 1:
+      try:
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0))
+      except CvBridgeError as e:
+        print(e)
+
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
-    self.tunnel_flag = True
+    
+    while self.clueboard_count == clueboard_start_count:
+      try:
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.3))
+      except CvBridgeError as e:
+        print(e)
+      self.find_clueboard(self.cv_image)
+
+    self.comp_pub.publish("kappa,chungus,-1,ZANIEL")
+    self.vel_pub.publish(self.stop_robot())
+    
   
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -838,11 +856,13 @@ class state_manager:
             print(e)
         elif self.pink_line_count == 1: 
           try:
-            self.vel_pub.publish(self.GrassFollowing(self.cv_image))
+            self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.3))
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 2:
           if self.yoda_found == False:
+            self.vel_pub.publish(self.forward_robot())
+            rospy.sleep(0.25)
             self.vel_pub.publish(self.stop_robot())
             self.detect_yoda()
           else: 
@@ -850,13 +870,8 @@ class state_manager:
               self.vel_pub.publish(self.yoda_follow(self.cv_image))
             except CvBridgeError as e:
               print(e)
-        elif self.tunnel_flag == False: 
-          self.tunnel()
         else:
-          try:
-            self.vel_pub.publish(self.GrassFollowing(self.cv_image))
-          except CvBridgeError as e:
-            print(e)
+          self.tunnel()
         
         self.find_clueboard(self.cv_image)
 
