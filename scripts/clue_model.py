@@ -29,7 +29,7 @@ class clue_model:
     def __init__(self):
 
         # Create a model and import weights
-        self.model = load_model('/home/fizzer/ros_ws/src/353CompT16Controller/scripts/trained_model.keras')
+        self.model = load_model('trained_model.keras')
         self.test_path = None
 
     # Creates a model with the license plate reader architecture
