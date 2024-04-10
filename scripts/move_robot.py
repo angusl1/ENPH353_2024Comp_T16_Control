@@ -37,7 +37,8 @@ class state_manager:
     self.pink_line_count = 0 # Flag for counting pink lines
     self.last_pink_time = 0 # Time at which last pink line was detected
     self.past_cb3 = False # Flag for passing clueboard 3
-    self.yoda_found = False
+    self.yoda_found = False # Flag for detecting if Yoda has been found
+    self.tunnel_flag = False # False if tunnel not passed
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
@@ -76,7 +77,7 @@ class state_manager:
         max_contour = max(contours, key=cv2.contourArea)
         
         if cv2.contourArea(max_contour) > 300000:
-         twist.angular.z = 5
+         twist.angular.z = 4
          return twist
 
         # Find the centroid of the largest contour
@@ -536,7 +537,7 @@ class state_manager:
   def detect_pink(self, frame):
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    max_height = 300
+    max_height = height
     bot_height = 0
     roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
     cx = 0
@@ -560,7 +561,7 @@ class state_manager:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
            self.last_pink_time = rospy.get_time()
-        elif max_contour_area > 2000:
+        elif max_contour_area > 1000:
            self.follow_pink(contours)              
 
   # Follows the pink line
@@ -613,8 +614,8 @@ class state_manager:
 
     height, width, _ = frame.shape
     hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    max_height = 360 # 270
-    bot_height = 60
+    max_height = 300 # 270
+    bot_height = 0
     roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
     centroid_x = width / 2
     centroid_y = height / 2
@@ -626,9 +627,9 @@ class state_manager:
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
     # mask = cv2.erode(mask, kernel, iterations = 1)
-    mask = cv2.dilate(mask, kernel, iterations = 3)
-    mask = cv2.erode(mask, kernel, iterations = 3)
-    mask = cv2.dilate(mask, kernel, iterations = 5)
+    mask = cv2.dilate(mask, kernel, iterations = 6)
+    # mask = cv2.erode(mask, kernel, iterations = 3)
+    # mask = cv2.dilate(mask, kernel, iterations = 5)
 
     # Find contours in the mask
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -663,7 +664,56 @@ class state_manager:
 
     #PID well i guess only P
     P = 0.020
-    I = 0.0125
+    #I = 0.015
+    D = 0.0125
+    min_error = 25
+
+    if np.abs(error) > min_error:
+      twist.angular.z = P * error - D * (error - self.past_error)
+    else: 
+      twist.angular.z = 0
+
+    self.past_error = error
+    
+    return twist
+
+  # Follow Yoda when detected
+  def yoda_follow(self,frame):
+
+    twist = Twist()
+    twist.linear.x = 0.4
+
+    height, width, _ = frame.shape
+    hsv_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    cx = 0
+
+    # Define the lower and upper bounds for sides of the path
+    lower = np.array([130, 0, 0])
+    upper = np.array([180, 75, 75])
+
+    # Create a mask for path sides and remove noise
+    mask = cv2.inRange(hsv_frame, lower, upper)
+
+    # Find contours in the mask
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    if contours:
+        # Remove the largest contour to find the second largest contour (assume other side of path)
+        max_contour = max(contours, key=cv2.contourArea)
+
+        if cv2.contourArea(max_contour) > 6000:
+           return self.stop_robot()  
+        # Find the centroid of the largest contour
+        M = cv2.moments(max_contour)
+        if M['m00'] != 0:
+            cx = int(M['m10'] / M['m00'])
+            cy = int(M['m01'] / M['m00'])
+
+    error = int(width/2) - cx
+
+    #PID well i guess only P
+    P = 0.02
+    I = 0.01
     min_error = 25
 
     if np.abs(error) > min_error:
@@ -674,15 +724,51 @@ class state_manager:
     self.past_error = error
     
     return twist
-
-  # Detects if Yoda is near the pink line
+  
+  # Wait until Yoda is detected and nearby
   def detect_yoda(self):
-    largest_yoda_contour = 1 
-    last_contour = 10
-    while last_contour/largest_yoda_contour > 0.9:
-       pass
+    largest_yoda_contour = 10
+    last_contour = 1
+    while last_contour/largest_yoda_contour > 0.9 or largest_yoda_contour < 3000:
+      hsv_frame = cv2.cvtColor(self.cv_image, cv2.COLOR_BGR2HSV)
+      cx = 0
+
+      # Define the lower and upper bounds for brown
+      lower = np.array([130, 0, 0])
+      upper = np.array([180, 75, 75])
+
+      # Create a mask for the gray path
+      mask = cv2.inRange(hsv_frame, lower, upper)
+
+      # Find contours in the mask
+      contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+      if contours:
+          # Find the contour with the largest area (assuming it's the path)
+          max_contour = max(contours, key=cv2.contourArea)
+          max_contour_area = cv2.contourArea(max_contour)
+          
+          if max_contour_area > largest_yoda_contour:
+             largest_yoda_contour = max_contour_area
+
+          last_contour = max_contour_area
+          print("Largest:", largest_yoda_contour, "Last:", last_contour)
+      
+      cv2.imshow("YodaCam", mask)
+      cv2.waitKey(3)
     
     self.yoda_found = True
+
+  # Hard-coded Tunnel Sequence
+  def tunnel(self):
+    self.vel_pub.publish(self.stop_robot())
+    self.vel_pub.publish(self.forward_robot())
+    rospy.sleep(0.7)
+    self.vel_pub.publish(self.rotate_left())
+    rospy.sleep(0.31)
+    self.vel_pub.publish(self.forward_robot())
+    rospy.sleep(3)
+    self.tunnel_flag = True
   
   # Return a twist object which renders the robot stationary
   def stop_robot(self):
@@ -702,6 +788,13 @@ class state_manager:
 
     return twist
 
+  # Return a twist object which makes the robot turn left
+  def rotate_left(self):
+      twist = Twist()
+      twist.angular.z = 2
+      twist.linear.x = 0
+      return twist
+  
   # Teleports the robot to the start of the course
   def reset_position(self):
 
@@ -752,7 +845,21 @@ class state_manager:
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 2:
-           self.vel_pub.publish(self.stop_robot())
+          if self.yoda_found == False:
+            self.vel_pub.publish(self.stop_robot())
+            self.detect_yoda()
+          else: 
+            try:
+              self.vel_pub.publish(self.yoda_follow(self.cv_image))
+            except CvBridgeError as e:
+              print(e)
+        elif self.tunnel_flag == False: 
+          self.tunnel()
+        else:
+          try:
+            self.vel_pub.publish(self.GrassFollowing(self.cv_image))
+          except CvBridgeError as e:
+            print(e)
         
         self.find_clueboard(self.cv_image)
 
@@ -760,7 +867,7 @@ class state_manager:
         if self.crosswalk:
           self.detect_crosswalk(self.cv_image) # Initiate a sequence if the crosswalk is detected
         elif self.pink_line_count < 3:
-          if rospy.get_time() - self.last_pink_time >= 5:
+          if rospy.get_time() - self.last_pink_time >= 8:
             self.detect_pink(self.cv_image)
 
       # End message
