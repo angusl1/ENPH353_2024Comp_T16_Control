@@ -18,7 +18,7 @@ from PIL import Image as pil
 import clue_model as cmodel
 import numpy as np
 
-MAX_TIME = 240
+MAX_TIME = 1000
 
 class state_manager:
   def __init__(self):
@@ -42,13 +42,13 @@ class state_manager:
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
-
-    self.prediction_model = cmodel.clue_model()
-
+    
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
+
+    self.prediction_model = cmodel.clue_model()
 
   def RoadFollowing(self,frame):
 
@@ -144,7 +144,7 @@ class state_manager:
         self.get_image = False
       return  
     
-    if area > 20000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
+    if area > 15000 and aspect_ratio < 2.0 and aspect_ratio > 1.0:
       # save the first time you see a clueboard
       self.clueboard_time = rospy.Time.now().to_sec()
 
@@ -198,6 +198,8 @@ class state_manager:
 
           if borderless_h / h < 6.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
+
+          print(borderless_h / h)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
@@ -314,7 +316,7 @@ class state_manager:
             # mask for letters
             hsv_pt_image = cv2.cvtColor(pt_image, cv2.COLOR_BGR2HSV)
 
-            lower_blue2 = np.array([115, 110, 50])
+            lower_blue2 = np.array([115, 90, 30])
             upper_blue2 = np.array([120, 255, 204])
 
             pt_blue_mask = cv2.inRange(hsv_pt_image, lower_blue2, upper_blue2)
@@ -555,7 +557,7 @@ class state_manager:
         max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
         
         # Check if area of max contour is large enough
-        if max_contour_area > 30000:
+        if max_contour_area > 50000:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
            print("Pink line count:", self.pink_line_count)
@@ -855,6 +857,7 @@ class state_manager:
           except CvBridgeError as e:
             print(e)
         elif self.pink_line_count == 1: 
+           # TODO move the grass following code here
           try:
             self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.3))
           except CvBridgeError as e:
