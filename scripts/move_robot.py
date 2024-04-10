@@ -563,7 +563,7 @@ class state_manager:
            self.pink_line_count = self.pink_line_count + 1
            print("Pink line count:", self.pink_line_count)
            self.last_pink_time = rospy.get_time()
-        elif max_contour_area > 500:
+        elif max_contour_area > 400:
            self.find_clueboard(frame)
            self.follow_pink(contours)              
 
@@ -624,7 +624,7 @@ class state_manager:
 
     # Define the lower and upper bounds for sides of the path
     lower = np.array([25, 30, 180])   
-    upper = np.array([60, 70, 255]) 
+    upper = np.array([60, 90, 255]) 
 
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
@@ -792,14 +792,14 @@ class state_manager:
     rospy.sleep(0.4)
 
     self.vel_pub.publish(self.rotate_left())
-    rospy.sleep(0.275)
+    rospy.sleep(0.26)
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
     
     while self.clueboard_count == clueboard_start_count:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.2, 6))
       except CvBridgeError as e:
         print(e)
       self.find_clueboard(self.cv_image)
