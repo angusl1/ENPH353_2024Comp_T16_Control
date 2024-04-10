@@ -200,20 +200,20 @@ class state_manager:
 
           if borderless_h / h < 6.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
-            print(borderless_h / h)
+            print(borderless_w / w)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
           letter_aspect_ratio = w / h
           print(letter_aspect_ratio)
 
-          if letter_aspect_ratio > 1.0 and letter_aspect_ratio < 1.51:
+          if letter_aspect_ratio > 0.8 and letter_aspect_ratio <= 1.5:
             mid_x = x + w // 2
             roi_box1 = frame[y:y+h, x:mid_x]
             roi_box2 = frame[y:y+h, mid_x:x+w]
             sorted_letters.append(roi_box1)
             sorted_letters.append(roi_box2)
-          elif letter_aspect_ratio > 1.51:
+          elif letter_aspect_ratio > 1.50:
             third_x = x + w // 3
             two_third_x = x + 2 * w // 3
             roi_box11 = frame[y:y+h, x:third_x]
@@ -250,7 +250,7 @@ class state_manager:
         cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
-        area_thresholds = [25000, 18000, 18000, 15000, 16000, 16000, 20000]
+        area_thresholds = [23000, 18000, 18000, 15000, 16000, 20000, 20000]
         self.area_threshold = area_thresholds[self.clueboard_count]
         print(self.area_threshold)
 
