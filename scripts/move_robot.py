@@ -250,7 +250,7 @@ class state_manager:
         cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
-        area_thresholds = [25000, 18000, 18000, 15000, 16000, 16000, 20000]
+        area_thresholds = [25000, 18000, 18000, 20000, 8000, 16000, 20000, 15000]
         self.area_threshold = area_thresholds[self.clueboard_count]
         print(self.area_threshold)
 
@@ -799,22 +799,30 @@ class state_manager:
     clueboard_start_count = self.clueboard_count
     while rospy.get_time() - tunnel_start_time < 1:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 4))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 2))
       except CvBridgeError as e:
         print(e)
 
     self.vel_pub.publish(self.forward_robot())
-    rospy.sleep(0.4)
+    rospy.sleep(0.5)
 
     self.vel_pub.publish(self.rotate_left())
-    rospy.sleep(0.26)
+    rospy.sleep(0.2)
+
+    tunnel_start_time = rospy.get_time()
+    while rospy.get_time() - tunnel_start_time < 1:
+      try:
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 2))
+      except CvBridgeError as e:
+        print(e)
+
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
     
     while self.clueboard_count == clueboard_start_count:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.2, 6))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
       except CvBridgeError as e:
         print(e)
       self.find_clueboard(self.cv_image)
@@ -899,7 +907,7 @@ class state_manager:
         elif self.pink_line_count == 2:
           if self.yoda_found == False:
             self.vel_pub.publish(self.forward_robot())
-            rospy.sleep(0.35)
+            rospy.sleep(0.4)
             self.vel_pub.publish(self.stop_robot())
             self.detect_yoda()
           else: 
@@ -910,7 +918,8 @@ class state_manager:
         else:
           self.tunnel()
         
-        self.find_clueboard(self.cv_image)
+        if self.pink_line_count != 2:
+          self.find_clueboard(self.cv_image)
 
         # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
         if self.crosswalk:
