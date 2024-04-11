@@ -926,7 +926,7 @@ class state_manager:
     cb_past_error = 0
     out_of_tunnel_time = rospy.get_time()
 
-    while rospy.get_time() - out_of_tunnel_time < 10:
+    while rospy.get_time() - out_of_tunnel_time < 8:
       try:
         self.vel_pub.publish(self.HillFollowing(self.cv_image, 0.25, 6))
       except CvBridgeError as e:
