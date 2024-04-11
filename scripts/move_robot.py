@@ -24,6 +24,7 @@ class state_manager:
   def __init__(self):
     self.bridge = CvBridge()
     self.kernel = np.ones((5,5),np.uint8)
+    self.id = 0
 
     self.image_sub = rospy.Subscriber("/R1/pi_camera/image_raw", Image, self.callback)
     self.timer_sub = rospy.Subscriber("/clock", Clock)
@@ -190,7 +191,7 @@ class state_manager:
           else:
             bottom_word.append(lc)
 
-        top_word = sorted(top_word, key=lambda c: cv2.boundingRect(c)[0])  
+        top_word = sorted(top_word, key=lambda c: cv2.boundingRect(c)[0])
         bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
 
         sorted_letters = []
@@ -200,21 +201,22 @@ class state_manager:
 
           print(borderless_h / h)
 
-          if borderless_h / h < 6.5 or borderless_h / h > 9.0:
+          if borderless_h / h < 5.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
           letter_aspect_ratio = w / h
-          # print(borderless_w / w)
+          print(borderless_w / w)
 
-          if letter_aspect_ratio > 0.8 and letter_aspect_ratio <= 1.5:
+          if letter_aspect_ratio > 1.05 and letter_aspect_ratio <= 1.6:
             mid_x = x + w // 2
             roi_box1 = frame[y:y+h, x:mid_x]
             roi_box2 = frame[y:y+h, mid_x:x+w]
             sorted_letters.append(roi_box1)
             sorted_letters.append(roi_box2)
-          elif letter_aspect_ratio > 1.50:
+
+          elif letter_aspect_ratio > 1.6:
             third_x = x + w // 3
             two_third_x = x + 2 * w // 3
             roi_box11 = frame[y:y+h, x:third_x]
@@ -223,6 +225,7 @@ class state_manager:
             sorted_letters.append(roi_box11)
             sorted_letters.append(roi_box12)
             sorted_letters.append(roi_box13)
+
           else:
             letter_roi = frame[y:y+h, x:x+w]
             sorted_letters.append(letter_roi)
