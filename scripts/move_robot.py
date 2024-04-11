@@ -261,7 +261,7 @@ class state_manager:
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
         # area_thresholds = [25000, 18000, 16000, 20000, 8000, 16000, 20000, 30000] # Good
-        area_thresholds = [25000, 25000, 20000, 25000, 20000, 20000, 20000, 30000, 30000]
+        area_thresholds = [25000, 25000, 16000, 25000, 20000, 18000, 20000, 30000, 30000]
         self.area_threshold = area_thresholds[self.clueboard_count+1]
 
         self.clueboard_count = self.clueboard_count + 1
@@ -957,7 +957,7 @@ class state_manager:
 
         if contours:
           max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
-          if max_contour_area > 10000:
+          if max_contour_area > 15000:
               print("MCA:", max_contour_area)
                   # Find the centroid of the largest contour
               M = cv2.moments(max(contours, key=cv2.contourArea))
