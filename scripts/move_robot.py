@@ -251,7 +251,7 @@ class state_manager:
         cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
-        area_thresholds = [23000, 18000, 18000, 15000, 16000, 20000, 20000]
+        area_thresholds = [25000, 18000, 18000, 20000, 8000, 16000, 20000, 15000]
         self.area_threshold = area_thresholds[self.clueboard_count]
         print(self.area_threshold)
 
@@ -579,7 +579,7 @@ class state_manager:
            self.pink_line_count = self.pink_line_count + 1
            print("Pink line count:", self.pink_line_count)
            self.last_pink_time = rospy.get_time()
-        elif max_contour_area > 500:
+        elif max_contour_area > 400:
            self.find_clueboard(frame)
            self.follow_pink(contours)              
 
@@ -640,7 +640,7 @@ class state_manager:
 
     # Define the lower and upper bounds for sides of the path
     lower = np.array([25, 30, 180])   
-    upper = np.array([60, 70, 255]) 
+    upper = np.array([60, 90, 255]) 
 
     # Create a mask for path sides and remove noise
     mask = cv2.inRange(roi_frame, lower, upper)
@@ -800,15 +800,23 @@ class state_manager:
     clueboard_start_count = self.clueboard_count
     while rospy.get_time() - tunnel_start_time < 1:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 4))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 2))
       except CvBridgeError as e:
         print(e)
 
     self.vel_pub.publish(self.forward_robot())
-    rospy.sleep(0.4)
+    rospy.sleep(0.5)
 
     self.vel_pub.publish(self.rotate_left())
-    rospy.sleep(0.275)
+    rospy.sleep(0.2)
+
+    tunnel_start_time = rospy.get_time()
+    while rospy.get_time() - tunnel_start_time < 1:
+      try:
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 2))
+      except CvBridgeError as e:
+        print(e)
+
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
@@ -900,7 +908,7 @@ class state_manager:
         elif self.pink_line_count == 2:
           if self.yoda_found == False:
             self.vel_pub.publish(self.forward_robot())
-            rospy.sleep(0.35)
+            rospy.sleep(0.4)
             self.vel_pub.publish(self.stop_robot())
             self.detect_yoda()
           else: 
@@ -911,7 +919,8 @@ class state_manager:
         else:
           self.tunnel()
         
-        self.find_clueboard(self.cv_image)
+        if self.pink_line_count != 2:
+          self.find_clueboard(self.cv_image)
 
         # Check if the crosswalk has been detected, only runs if crosswalk has not been detected yet
         if self.crosswalk:
