@@ -201,11 +201,10 @@ class state_manager:
         bottom_word = sorted(bottom_word, key=lambda c: cv2.boundingRect(c)[0])
 
         sorted_letters = []
-        print(borderless_w)
-        print(image_area)
 
         for i, lc in enumerate(bottom_word):
           x, y, w, h = cv2.boundingRect(lc)
+          print(borderless_h / h)
 
           if borderless_h / h < 5.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
@@ -222,7 +221,7 @@ class state_manager:
             sorted_letters.append(roi_box1)
             sorted_letters.append(roi_box2)
 
-          elif width_ratio <= 7.5:
+          elif width_ratio <= 7.5 and width_ratio > 5:
             third_x = x + w // 3
             two_third_x = x + 2 * w // 3
             roi_box11 = frame[y:y+h, x:third_x]
@@ -231,6 +230,19 @@ class state_manager:
             sorted_letters.append(roi_box11)
             sorted_letters.append(roi_box12)
             sorted_letters.append(roi_box13)
+
+          elif width_ratio <= 5:
+            fourth_x = x + w // 4
+            half_x = x + 2 * w // 4
+            three_quarters_x = x + 3 * w // 4
+            roi_box21 = frame[y:y+h, x:fourth_x]
+            roi_box22 = frame[y:y+h, fourth_x:half_x]
+            roi_box23 = frame[y:y+h, half_x:three_quarters_x]
+            roi_box24 = frame[y:y+h, three_quarters_x:x+w]
+            sorted_letters.append(roi_box21)
+            sorted_letters.append(roi_box22)
+            sorted_letters.append(roi_box23)
+            sorted_letters.append(roi_box24)
 
           else:
             letter_roi = frame[y:y+h, x:x+w]
@@ -261,7 +273,7 @@ class state_manager:
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
         # area_thresholds = [25000, 18000, 16000, 20000, 8000, 16000, 20000, 30000] # Good
-        area_thresholds = [25000, 25000, 20000, 25000, 20000, 20000, 20000, 30000, 30000]
+        area_thresholds = [25000, 25000, 20000, 20000, 25000, 25000, 20000, 30000, 30000]
         self.area_threshold = area_thresholds[self.clueboard_count+1]
 
         self.clueboard_count = self.clueboard_count + 1
