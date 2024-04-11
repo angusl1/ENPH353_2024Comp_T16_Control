@@ -198,14 +198,15 @@ class state_manager:
         for i, lc in enumerate(bottom_word):
           x, y, w, h = cv2.boundingRect(lc)
 
+          print(borderless_h / h)
+
           if borderless_h / h < 6.5 or borderless_h / h > 9.0:
             bottom_word.pop(i)
-            print(borderless_w / w)
 
         for lc in bottom_word:
           x, y, w, h = cv2.boundingRect(lc)
           letter_aspect_ratio = w / h
-          print(letter_aspect_ratio)
+          # print(borderless_w / w)
 
           if letter_aspect_ratio > 0.8 and letter_aspect_ratio <= 1.5:
             mid_x = x + w // 2
