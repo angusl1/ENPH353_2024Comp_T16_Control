@@ -18,7 +18,7 @@ from PIL import Image as pil
 import clue_model as cmodel
 import numpy as np
 
-MAX_TIME = 1000
+MAX_TIME = 240
 
 class state_manager:
   def __init__(self):
@@ -363,7 +363,7 @@ class state_manager:
     # draw potential clueboard contours in red
     cv2.drawContours(contour_image, potential_clueboards, -1, (0, 0, 255), 2)
 
-    cv2.imshow('Contours', contour_image)     
+    # cv2.imshow('Contours', contour_image)     
 
   def callback(self,data):
       try:
@@ -913,12 +913,12 @@ class state_manager:
     tunnel_start_time = rospy.get_time()
     while rospy.get_time() - tunnel_start_time < 2:
       try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 2))
+        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0, 4))
       except CvBridgeError as e:
         print(e)
 
     self.vel_pub.publish(self.rotate_left())
-    rospy.sleep(0.02)
+    rospy.sleep(0.01)
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(2.5)
@@ -957,7 +957,7 @@ class state_manager:
 
         if contours:
           max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
-          if max_contour_area > 15000:
+          if max_contour_area > 12000:
               print("MCA:", max_contour_area)
                   # Find the centroid of the largest contour
               M = cv2.moments(max(contours, key=cv2.contourArea))
@@ -976,7 +976,7 @@ class state_manager:
               min_error = 25
 
               twist = Twist()
-              twist.linear.x = 0.3
+              twist.linear.x = 0.4
 
               if np.abs(error) > min_error:
                 pass
@@ -1133,7 +1133,7 @@ def main(args):
   rospy.init_node('image_converter', anonymous=True)
   rob = state_manager()
 
-  rob.reset_position()
+  #rob.reset_position()
   rob.start()
 
   print("Shutting down")
