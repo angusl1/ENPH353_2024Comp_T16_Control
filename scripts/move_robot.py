@@ -36,21 +36,24 @@ class state_manager:
     self.crosswalk = True # Flag for detecting crosswalk
     self.pink_line_count = 0 # Flag for counting pink lines
     self.last_pink_time = 0 # Time at which last pink line was detected
+    self.pink1_time = 0 # Time at which first pink line is read
     self.past_cb3 = False # Flag for passing clueboard 3
+    self.past_cb5 = False # Flag for reading clueboard 5
     self.yoda_found = False # Flag for detecting if Yoda has been found
     self.tunnel_flag = False # False if tunnel not passed
-    self.finished_flag = False
+    self.finished_flag = False # Finished tunnel sequence
+    
 
     self.past_error = 0 # For I in line following
     self.num_letters = 0 # number of letters in a word
-    self.area_threshold = 25000
+    self.area_threshold = 30000
+
+    self.prediction_model = cmodel.clue_model()
     
     rospy.sleep(1)
     self.comp_pub.publish("kappa,chungus,0,ZANIEL")
     self.start_time = rospy.get_time()
     self.clueboard_time = 0
-
-    self.prediction_model = cmodel.clue_model()
 
   def RoadFollowing(self,frame):
 
@@ -148,6 +151,8 @@ class state_manager:
     
     if area > self.area_threshold and aspect_ratio < 2.0 and aspect_ratio > 1.0:
       # save the first time you see a clueboard
+      print("Area: ", area)
+      print("Threshold:", self.area_threshold)
       self.clueboard_time = rospy.Time.now().to_sec()
 
       cv2.imwrite('clueboard.jpg', frame)
@@ -250,9 +255,9 @@ class state_manager:
         cv2.drawContours(letter_image, bottom_word, -1, (0, 0, 255), 1)
         cv2.imshow('Bounding Boxes around letters', letter_image)
 
-        area_thresholds = [25000, 18000, 18000, 20000, 8000, 16000, 20000, 15000]
-        self.area_threshold = area_thresholds[self.clueboard_count]
-        print(self.area_threshold)
+        # area_thresholds = [25000, 18000, 16000, 20000, 8000, 16000, 20000, 30000] # Good
+        area_thresholds = [25000, 25000, 20000, 20000, 20000, 16000, 20000, 30000, 30000]
+        self.area_threshold = area_thresholds[self.clueboard_count+1]
 
         self.clueboard_count = self.clueboard_count + 1
         print("Clueboard count: " ,(self.clueboard_count))
@@ -576,6 +581,8 @@ class state_manager:
         if max_contour_area > 20000:
            print("Pink Line Detected.\nArea:" ,(max_contour_area))
            self.pink_line_count = self.pink_line_count + 1
+           if self.pink_line_count == 1 and self.pink1_time == 0:
+              self.pink1_time = rospy.get_time()
            print("Pink line count:", self.pink_line_count)
            self.last_pink_time = rospy.get_time()
         elif max_contour_area > 400:
@@ -698,7 +705,7 @@ class state_manager:
     error = int(width/2) - centroid_x
 
     #PID well i guess only P
-    P = 0.02
+    P = 0.02 # 0.02 is really good
     I = 0.0125
     min_error = 25
 
@@ -819,12 +826,81 @@ class state_manager:
 
     self.vel_pub.publish(self.forward_robot())
     rospy.sleep(3)
-    
-    while self.clueboard_count == clueboard_start_count:
-      try:
-        self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
-      except CvBridgeError as e:
-        print(e)
+
+    cb_past_error = 0
+    out_of_tunnel_time = rospy.get_time()
+    while self.clueboard_count == clueboard_start_count and not rospy.is_shutdown():
+      if rospy.get_time() - out_of_tunnel_time < 30:
+        try:
+          self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
+        except CvBridgeError as e:
+          print(e)
+      else:
+        height, width, _ = self.cv_image.shape
+        hsv_frame = cv2.cvtColor(self.cv_image, cv2.COLOR_BGR2HSV)
+        max_height = height
+        bot_height = 0
+        roi_frame = hsv_frame[height-max_height:height-bot_height, 0:width]
+        cx = 0
+
+        # Define the lower and upper bounds for blue line
+        lower = np.array([118, 50, 20]) 
+        upper = np.array([122, 255, 255]) 
+
+        # Create a mask for the crosswalk line
+        mask = cv2.inRange(roi_frame, lower, upper)
+
+        # Find contours in the mask
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if contours:
+          max_contour_area = cv2.contourArea(max(contours, key=cv2.contourArea))
+          if max_contour_area > 10000:
+                  # Find the centroid of the largest contour
+              M = cv2.moments(max(contours, key=cv2.contourArea))
+              if M['m00'] != 0:
+                  cx = int(M['m10'] / M['m00'])
+                  cy = int(M['m01'] / M['m00'])
+
+              #cv2.imshow("Mask window", gray_mask)
+              #cv2.waitKey(3)
+
+              error = 640 - cx
+
+              #PID well i guess only P
+              P = 0.020
+              I = 0.010
+              min_error = 25
+
+              twist = Twist()
+              twist.linear.x = 0.4
+
+              if np.abs(error) > min_error:
+                pass
+                twist.angular.z = P * error - I * (error - cb_past_error)
+              else: 
+                twist.angular.z = 0
+
+              cb_past_error = error
+              
+              try:
+                self.vel_pub.publish(twist)
+              except CvBridgeError as e:
+                print(e)
+              
+              self.find_clueboard(self.cv_image)
+          else:
+              try:
+                self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
+              except CvBridgeError as e:
+                print(e)
+        else:
+          try:
+            self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 6))
+          except CvBridgeError as e:
+            print(e) 
+
+      
       self.find_clueboard(self.cv_image)
 
     self.finished_flag = True
@@ -900,6 +976,12 @@ class state_manager:
             print(e)
         elif self.pink_line_count == 1: 
            # TODO move the grass following code here
+          if self.past_cb5 == False and rospy.get_time() - self.pink1_time > 23:
+             spin_start_time = rospy.get_time()
+             while rospy.get_time() - spin_start_time < 5:
+                self.vel_pub.publish(self.rotate_left())
+                self.find_clueboard(self.cv_image)
+             self.past_cb5 = True
           try:
             self.vel_pub.publish(self.GrassFollowing(self.cv_image, 0.25, 5))
           except CvBridgeError as e:
